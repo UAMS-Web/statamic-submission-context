@@ -48,6 +48,19 @@ jobs:
       # Fails when composer.json and composer.lock have drifted apart.
       - run: composer validate --no-check-publish --no-check-all
 
+  synced-files:
+    name: Synced files (no hand-edited rules or skills)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # Fails, naming the file, when a synced rule or skill was edited by hand.
+      - run: node .claude/skills/synced-files/scripts/check-synced-files.mjs
 
   no-emoji:
     name: Repository guards (emoji, decision log)
@@ -126,6 +139,17 @@ jobs:
       - uses: ./.github/actions/setup
       - run: composer test:mutate-ignore
 
+  mutation-instrument:
+    name: Mutation instrument (a mutant child can launch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      # Fails when a mutant child cannot be launched, which would score every mutant killed.
+      # A real mutation smoke (one that also asserts mutants were created) waits until src/
+      # has logic to mutate.
+      - run: composer test:mutation-instrument
 
   parallel-safe:
     name: Parallel-safe tests (no shared state)
