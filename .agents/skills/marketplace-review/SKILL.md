@@ -2,6 +2,12 @@
 name: marketplace-review
 description: Review a Statamic starter kit or add-on before marketplace submission against eleven numbered submission standards. Report evidence, uncertainty, impact, and required changes without granting approval.
 ---
+<!--
+  Synced from UAMS-Web/uams-claude-skills: shared/.claude/skills/marketplace-review/SKILL.md
+  Edit it there, not here; the next sync overwrites this copy.
+  Delivered to this repository through the profile(s): statamic-package.
+-->
+<!-- cspell:ignore reskin reskinning navigations fieldsets -->
 
 # Statamic marketplace review
 
