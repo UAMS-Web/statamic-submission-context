@@ -75,6 +75,7 @@
         "test:serial": "pest --testsuite=Unit,Integration",
         "stan": "phpstan analyse --no-progress --memory-limit=2G",
         "test:mutate-ignore": "@php scripts/check-mutate-ignore.php",
+        "test:mutation-instrument": "@php .claude/skills/pcov-setup/scripts/check-mutation-instrument.php",
         "test:parallel-safe": "@php scripts/check-parallel-safe-tests.php",
         "test:bands": [
             "@php scripts/check-skip-baseline.php --report=junit-parallel.xml --band=parallel",
@@ -88,6 +89,7 @@
         "ci": [
             "@test:scripts",
             "@test:mutate-ignore",
+            "@test:mutation-instrument",
             "@test:parallel-safe",
             "@test:pint",
             "@test:refactor",
