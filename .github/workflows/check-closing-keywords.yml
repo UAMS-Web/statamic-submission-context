@@ -1,0 +1,42 @@
+name: Check closing keywords
+
+# Fails when a pull-request body forms a closing directive across a line break: a keyword ending
+# one line and an issue reference starting the next. GitHub treats a newline as whitespace, so the
+# pair is read as `closed #N` and merging closes that issue, although nobody typed a directive
+# (`pre-merge-check`, closing-keyword step). The `closingIssuesReferences` field does not show it.
+# A same-line `Closes #N` is the deliberate form and is never reported.
+#
+# The body is read from the API rather than from the event payload, for the reason the
+# attribution-footer check gives. All five trigger types are needed because a body can change
+# at any of them.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, ready_for_review, synchronize]
+
+# Nothing at the workflow level; the one job states the scopes it needs.
+permissions: {}
+
+jobs:
+  check:
+    name: Closing keywords
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Check the body for cross-line closing directives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh api "repos/$REPO/pulls/$NUMBER" --jq '.body // ""' > "$RUNNER_TEMP/body.md"
+          node scripts/check-closing-keyword-across-lines.mjs --file "$RUNNER_TEMP/body.md"

@@ -1,0 +1,19 @@
+{
+    "_comment": [
+        "Expected skipped-test counts per band.",
+        "",
+        "The gate treats 'zero failures' as success, so a run that silently skips tests",
+        "reports PASS having tested less than it should have. These counts make an",
+        "unexpected skip a failure instead of silence.",
+        "",
+        "Raising a number here is a deliberate, reviewable act. If a band exceeds its",
+        "baseline, the default assumption is a real regression. Update the baseline only",
+        "once you know why the new skip is correct, and say so in the PR."
+    ],
+    "bands": {
+        "parallel": {
+            "expected": 0,
+            "why": "No test skips. Every test in the Unit and Integration suites runs."
+        }
+    }
+}

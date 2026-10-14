@@ -1,0 +1,77 @@
+{
+    "_hash": "90d73c38d97046950a5c0ab5f10116be246c316e792c5d8ccdc9a6e9e330afeb",
+    "patches": {
+        "pestphp/pest-plugin-mutate": [
+            {
+                "package": "pestphp/pest-plugin-mutate",
+                "description": "Launch each mutant child process so a run cannot score every mutant killed without executing one (temporary)",
+                "url": "patches/pest-plugin-mutate-mutant-process-launch.patch",
+                "sha256": "7a6c762ea7a0eaf0043f251a76fec8bb48f2bf6dd062e684a989b592e670ebbc",
+                "depth": 1,
+                "extra": {
+                    "provenance": "patches-file:patches.json"
+                }
+            },
+            {
+                "package": "pestphp/pest-plugin-mutate",
+                "description": "Stop three silent @pest-mutate-ignore parsing defects suppressing nothing or the wrong set (temporary)",
+                "url": "patches/pest-plugin-mutate-annotation-parsing.patch",
+                "sha256": "6e0994c0bfa9a637a90efccfb14b3c37831b76bd39d57f826ac18aeaf2a57915",
+                "depth": 1,
+                "extra": {
+                    "provenance": "patches-file:patches.json"
+                }
+            },
+            {
+                "package": "pestphp/pest-plugin-mutate",
+                "description": "Let a mutant child on Windows run its tests and write files, so its failure is a real kill (temporary)",
+                "url": "patches/pest-plugin-mutate-windows-mutant-child.patch",
+                "sha256": "2d3d2cebd7d0d6ef642c6e1c64ddce866d018e1bdec235df57b8a00f988a6341",
+                "depth": 1,
+                "extra": {
+                    "provenance": "patches-file:patches.json"
+                }
+            },
+            {
+                "package": "pestphp/pest-plugin-mutate",
+                "description": "Drop the run's own --filter from each mutant child so a filtered run cannot score every mutant killed (temporary)",
+                "url": "patches/pest-plugin-mutate-drop-run-filter.patch",
+                "sha256": "538ba0225a9ed22a1cb01483ddc62dffb41f2f220d4629333ba7caaf052026b7",
+                "depth": 1,
+                "extra": {
+                    "provenance": "patches-file:patches.json"
+                }
+            },
+            {
+                "package": "pestphp/pest-plugin-mutate",
+                "description": "Widen or refuse a Windows mutant child's filter that would pass the cmd.exe command-line limit (temporary)",
+                "url": "patches/pest-plugin-mutate-windows-filter-length.patch",
+                "sha256": "ba601a0b09bbcbb2cad20820479c89fc55861158e15677fc85fa3ac3004f3358",
+                "depth": 1,
+                "extra": {
+                    "provenance": "patches-file:patches.json"
+                }
+            },
+            {
+                "package": "pestphp/pest-plugin-mutate",
+                "description": "Create the mutations directory and fail on a mutated source that cannot be written (temporary)",
+                "url": "patches/pest-plugin-mutate-write-mutated-source.patch",
+                "sha256": "5519d00dce1e8bd364c28c208997e57619242f39733d04f953fba9d0708d1c62",
+                "depth": 1,
+                "extra": {
+                    "provenance": "patches-file:patches.json"
+                }
+            },
+            {
+                "package": "pestphp/pest-plugin-mutate",
+                "description": "Drop the parallel runner's options from each mutant child so a parallel run cannot score every mutant killed (temporary)",
+                "url": "patches/pest-plugin-mutate-drop-parallel-runner-options.patch",
+                "sha256": "b999bc57c3eb43da339e37e7781f3f1d479481dc6f82c5b388775f1083b5043c",
+                "depth": 1,
+                "extra": {
+                    "provenance": "patches-file:patches.json"
+                }
+            }
+        ]
+    }
+}

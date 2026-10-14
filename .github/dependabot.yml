@@ -1,0 +1,46 @@
+# Weekly version updates (UAMS-Web/uams-claude-skills#77). Dependabot alerts and security
+# updates are enabled at the organization level and do not depend on this file; this file
+# adds the routine updates, which run only where a repository commits it. Each pull request
+# it opens goes through the same pre-merge check as any other change, and one that changes
+# composer.lock is re-checked against patches/ per the update-dependencies-ticket skill.
+#
+# One entry per package ecosystem. Minor and patch updates are grouped per entry, so a week
+# produces a few pull requests rather than one per package; a major update stays in a pull
+# request of its own. The npm entry covers the dev-only tooling behind the guard-script tests.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    target-branch: main
+    schedule:
+      interval: weekly
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: composer
+    directory: /
+    target-branch: main
+    schedule:
+      interval: weekly
+    groups:
+      composer-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # The workflows, plus the local composite action they call.
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/setup
+    target-branch: main
+    schedule:
+      interval: weekly
+    groups:
+      github-actions-minor-and-patch:
+        update-types:
+          - minor
+          - patch

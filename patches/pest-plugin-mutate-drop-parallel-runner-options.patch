@@ -1,0 +1,62 @@
+--- a/src/MutationTest.php
++++ b/src/MutationTest.php
+@@ -128,7 +128,59 @@
+             $withoutRunFilter[] = $argument;
+         }
+         $filteredArguments = $withoutRunFilter;
++
++        // Drop the options only the parallel runner understands. The runner hands their values
++        // to its workers; a mutant child is a plain run that rejects each one ("Unknown option")
++        // and exits 2, and hasFinished() scored that exit as a kill for every mutant. A child
++        // never collects coverage or spawns workers, so it needs nothing these options carry.
++        // Measured with pest-plugin-mutate v5.0.2: each of these exits 2 in a plain run, while
++        // -p, -v and --shard do not. See uams-statamic#2926 and #2947.
++        $parallelRunnerValueOptions = [
++            '--max-batch-size',
++            '--max-processes',
++            '--passthru-php',
++            '--processes',
++            '--runner',
++            '--shard-test-distribution',
++            '--shard-test-distribution-seed',
++            '--tmp-dir',
++        ];
++        $parallelRunnerFlags = ['--functional', '--no-test-tokens', '--verbose'];
++        $withoutParallelRunnerOptions = [];
++        $skipOptionValue = false;
++        foreach ($filteredArguments as $argument) {
++            if ($skipOptionValue) {
++                $skipOptionValue = false;
++
++                continue;
++            }
++
++            if (in_array($argument, $parallelRunnerFlags, true)) {
++                continue;
++            }
+ 
++            // `--option value` and `-m value` carry their value in the next argument.
++            if ($argument === '-m' || in_array($argument, $parallelRunnerValueOptions, true)) {
++                $skipOptionValue = true;
++
++                continue;
++            }
++
++            // `--option=value` and `-m<value>` are one argument.
++            if (preg_match('/^-m\S/', $argument) === 1) {
++                continue;
++            }
++
++            foreach ($parallelRunnerValueOptions as $option) {
++                if (str_starts_with($argument, $option.'=')) {
++                    continue 2;
++                }
++            }
++
++            $withoutParallelRunnerOptions[] = $argument;
++        }
++        $filteredArguments = $withoutParallelRunnerOptions;
++
+         // TODO: filter arguments to remove unnecessary stuff (Teamcity, Coverage, etc.)
+         $process = new Process(
+             command: [

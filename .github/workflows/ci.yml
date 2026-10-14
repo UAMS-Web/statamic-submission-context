@@ -1,0 +1,225 @@
+name: CI
+
+# The jobs mirror the scripts `composer ci` runs locally, but run in parallel: this repository
+# is public, so runner minutes are not a budget, and every failure on a pull request shows at
+# once instead of one job at a time. `composer ci` keeps its cost order, so a local run still
+# stops at the first failure. When a job's command changes here, change the matching `composer`
+# script (and the other way round). The shared setup lives in
+# `.github/actions/setup/action.yml`.
+#
+# REQUIRED CHECKS. The organization ruleset "main: required checks
+# (<this repository>)" requires every job's `name:` below, plus the `name:` of the two
+# pull-request-body workflows, by that exact string. Renaming or adding a job here means
+# updating that ruleset's list in the same change: a renamed job leaves the old name pending
+# forever and blocks every pull request, and a new job is not required until it is listed.
+# Job names must stay unique across all workflows in this repository.
+# `check-required-checks.yml` compares the two lists and reports drift; see its header for the
+# order in which a job and its ruleset entry change.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # Lets the workflow be run on demand against a branch.
+  workflow_dispatch:
+
+# A new push to a pull request cancels that pull request's stale run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  composer-validate:
+    name: Composer validate (composer.lock freshness)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+
+      # Fails when composer.json and composer.lock have drifted apart.
+      - run: composer validate --no-check-publish --no-check-all
+
+
+  no-emoji:
+    name: Repository guards (emoji, decision log)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # Fails, naming the file and code points, when an emoji reaches a tracked record.
+      - run: node scripts/check-no-emoji.mjs
+
+      # Fails, naming the two entries, when docs/DECISIONS.md is out of order.
+      - run: node scripts/check-decision-log-order.mjs
+
+  scripts:
+    name: Guard-script tests (vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      # `@statamic/cms` is a `file:` link into `vendor/statamic/cms`, so `npm ci` needs Composer's
+      # install first.
+      - uses: ./.github/actions/setup
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # Node 22 bundles npm 10.9.x, below the `engines.npm` floor that `.npmrc`'s
+      # engine-strict enforces, so `npm ci` refuses to run without this pin.
+      - name: Pin npm to the engines floor
+        run: npm install -g npm@^11.10.0
+
+      - run: npm ci
+      - run: npm run test:scripts
+
+  built-assets:
+    name: Built assets (resources/dist matches source)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Pin npm to the engines floor
+        run: npm install -g npm@^11.10.0
+
+      - run: npm ci
+
+      # The built files are committed, because a Composer install does not run npm. A fresh
+      # build that differs from what is committed means the sources changed without a rebuild.
+      - run: npm run build
+      - name: Fail if the committed build is out of date
+        run: |
+          changes=$(git status --porcelain -- resources/dist)
+          if [ -n "$changes" ]; then
+            echo "$changes"
+            echo "::error::resources/dist differs from a fresh build. Run npm run build and commit the result."
+            exit 1
+          fi
+
+  mutate-ignore:
+    name: Mutation annotations (none inert)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: composer test:mutate-ignore
+
+
+  parallel-safe:
+    name: Parallel-safe tests (no shared state)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+      # Dependency-free, so it needs PHP and nothing else.
+      - run: composer test:parallel-safe
+
+  pint:
+    name: Pint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: composer test:pint
+
+  rector:
+    name: Rector (gating profile)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: composer test:refactor
+
+  phpstan:
+    name: Larastan (PHPStan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: composer stan
+
+  pest:
+    name: Pest (Unit and Integration)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      # --log-junit feeds the band checks below; it changes nothing about what runs.
+      - name: Run the suite
+        run: composer test -- --display-all-issues --log-junit junit-parallel.xml
+
+      # Fails when more tests skipped than tests/skip-baseline.json records (a silent skip
+      # must not read as a pass), or when one class's cost nears the band's.
+      - name: Check the band reports
+        run: composer test:bands
+
+  # The add-on promises `statamic/cms` at its `composer.json` constraint and PHP ^8.4, and every
+  # job above runs one combination. These legs run the dependency-sensitive checks (Larastan and
+  # Pest) against the others:
+  #   - lowest: the lowest `statamic/cms` the constraint allows, with the dependencies it needs
+  #     pulled to their lowest, so an API newer than the declared floor fails here.
+  #   - php85: the locked dependencies on PHP 8.5.
+  # The lowest bound is derived from the constraint in `composer.json`, never written here, so
+  # raising the floor (when code starts to need a newer `statamic/cms` API) moves this leg with it.
+  # Check names carry no version number for the same reason: the ruleset's list stays stable.
+  # Only the `statamic/cms` dependency closure is lowered; the dev tooling stays locked. The
+  # update rewrites `composer.lock` in the runner only.
+  compatibility:
+    name: Compatibility (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: lowest statamic/cms
+            php: '8.4'
+            lowest: true
+          - name: PHP 8.5
+            php: '8.5'
+            lowest: false
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+        with:
+          php-version: ${{ matrix.php }}
+
+      - name: Lower statamic/cms and its dependencies to their lowest allowed versions
+        if: matrix.lowest
+        run: composer update statamic/cms --prefer-lowest --with-all-dependencies --no-interaction --no-progress
+
+      - name: Show the resolved statamic/cms
+        run: composer show statamic/cms | grep -E '^(name|versions)'
+
+      - run: composer stan
+      - run: composer test

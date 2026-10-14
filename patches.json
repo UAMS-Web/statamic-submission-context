@@ -1,0 +1,13 @@
+{
+    "patches": {
+        "pestphp/pest-plugin-mutate": {
+            "Launch each mutant child process so a run cannot score every mutant killed without executing one (temporary)": "patches/pest-plugin-mutate-mutant-process-launch.patch",
+            "Stop three silent @pest-mutate-ignore parsing defects suppressing nothing or the wrong set (temporary)": "patches/pest-plugin-mutate-annotation-parsing.patch",
+            "Let a mutant child on Windows run its tests and write files, so its failure is a real kill (temporary)": "patches/pest-plugin-mutate-windows-mutant-child.patch",
+            "Drop the run's own --filter from each mutant child so a filtered run cannot score every mutant killed (temporary)": "patches/pest-plugin-mutate-drop-run-filter.patch",
+            "Widen or refuse a Windows mutant child's filter that would pass the cmd.exe command-line limit (temporary)": "patches/pest-plugin-mutate-windows-filter-length.patch",
+            "Create the mutations directory and fail on a mutated source that cannot be written (temporary)": "patches/pest-plugin-mutate-write-mutated-source.patch",
+            "Drop the parallel runner's options from each mutant child so a parallel run cannot score every mutant killed (temporary)": "patches/pest-plugin-mutate-drop-parallel-runner-options.patch"
+        }
+    }
+}

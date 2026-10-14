@@ -1,0 +1,100 @@
+--- a/src/MutationTest.php
++++ b/src/MutationTest.php
+@@ -11,11 +11,25 @@
+ use Pest\Mutate\Support\Configuration\Configuration;
+ use Pest\Mutate\Support\MutationTestResult;
+ use Pest\Support\Container;
++use RuntimeException;
+ use Symfony\Component\Process\Exception\ProcessTimedOutException;
+ use Symfony\Component\Process\Process;
+ 
+ class MutationTest
+ {
++    /**
++     * The longest command line cmd.exe accepts. On Windows every Symfony Process runs as
++     * `cmd.exe /V:ON /E:ON /D /C (...)`, whatever the executable, so this bounds every mutant child.
++     */
++    private const int WINDOWS_COMMAND_LINE_LIMIT = 8191;
++
++    /**
++     * Room left for what is added around the arguments: the cmd.exe path and switches, the
++     * stdout/stderr redirections to temporary files, and the batch launcher re-issuing its own
++     * command line. Deliberately generous, because over-estimating only widens a filter.
++     */
++    private const int WINDOWS_COMMAND_LINE_HEADROOM = 1024;
++
+     private MutationTestResult $result = MutationTestResult::None;
+ 
+     private ?float $start = null;
+@@ -126,7 +140,7 @@
+                 // batch launcher, and cmd.exe's re-parse leaves the `|` between two or more test
+                 // names bare -- it pipes, the child exits without running a test, and
+                 // hasFinished() scores it killed. See uams-statamic#2524.
+-                '--filter='.implode('|', $filters),
++                '--filter='.self::childFilter($filters, [...$filteredArguments, '--bail'], DIRECTORY_SEPARATOR === '\\', $this->mutation->file->getRealPath().':'.$this->mutation->startLine),
+             ],
+             env: $envs,
+             timeout: $this->calculateTimeout(),
+@@ -141,6 +155,62 @@
+         return true;
+     }
+ 
++    /**
++     * The --filter value for a mutant child, kept short enough for its command line to launch.
++     *
++     * The filter names every covering test, so a heavily covered mutant can push the child's
++     * command line past cmd.exe's limit. That child exits 1 without running a test, and
++     * hasFinished() reads any non-zero exit as a kill. So on Windows, a filter that does not fit
++     * is widened to the covering test CLASSES, which only adds tests that exercise the same
++     * code, so a kill they score is still real. If even that does not fit, the run refuses
++     * rather than score a mutant it cannot test. See uams-statamic#2578.
++     *
++     * @param  array<int, string>  $filters  One pattern per covering test, `Class::(.*)name`
++     * @param  array<int, string>  $command  The child's arguments before --filter
++     *
++     * @throws RuntimeException When even the class-level filter cannot fit
++     */
++    public static function childFilter(array $filters, array $command, bool $windows, string $mutant = ''): string
++    {
++        $filter = implode('|', $filters);
++
++        if (! $windows) {
++            return $filter;
++        }
++
++        $budget = self::WINDOWS_COMMAND_LINE_LIMIT - self::WINDOWS_COMMAND_LINE_HEADROOM;
++
++        // Every argument is counted as if quoted and space-separated, which is at least as long
++        // as what Symfony Process builds from it.
++        $length = static fn (string $candidate): int => array_sum(array_map(
++            static fn (string $argument): int => strlen($argument) + 3,
++            [...$command, '--filter='.$candidate],
++        ));
++
++        if ($length($filter) <= $budget) {
++            return $filter;
++        }
++
++        $classes = implode('|', array_values(array_unique(array_map(
++            static fn (string $pattern): string => explode('::', $pattern, 2)[0].'::',
++            $filters,
++        ))));
++
++        if ($length($classes) <= $budget) {
++            return $classes;
++        }
++
++        throw new RuntimeException(sprintf(
++            'Cannot test the mutant at %s on Windows: its %d covering tests, even named by class, make a '
++            .'command line of about %d characters, and cmd.exe accepts at most %d. Scoring it would '
++            .'report a kill without running a test. See uams-statamic#2578.',
++            $mutant,
++            count($filters),
++            $length($classes),
++            self::WINDOWS_COMMAND_LINE_LIMIT,
++        ));
++    }
++
+     private function calculateTimeout(): int
+     {
+         /** @var TelemetryRepository $telemetryRepository */

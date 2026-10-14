@@ -1,0 +1,41 @@
+diff --git a/src/Support/MutationGenerator.php b/src/Support/MutationGenerator.php
+index cebc859..a009418 100644
+--- a/src/Support/MutationGenerator.php
++++ b/src/Support/MutationGenerator.php
+@@ -47,6 +47,11 @@ class MutationGenerator
+         $mutatorsToIgnoreByLine = [];
+         foreach (explode(PHP_EOL, $contents) as $lineNumber => $line) {
+             if (str_contains($line, '@pest-mutate-ignore')) {
++                // Reset per line. Without this the variable survives from an earlier
++                // annotation, so a BARE marker inherits that line's mutator list and the
++                // `?? ['all']` below can never fire once any `:`-form has been seen.
++                $mutatorsToIgnore = null;
++
+                 if (Str::after($line, '@pest-mutate-ignore:') !== $line) {
+                     $mutatorsToIgnore = explode(',', Str::after($line, '@pest-mutate-ignore:'));
+                     $mutatorsToIgnore = array_map(trim(...), $mutatorsToIgnore);
+diff --git a/src/Support/NodeVisitor.php b/src/Support/NodeVisitor.php
+index a1e5fc1..902a21a 100644
+--- a/src/Support/NodeVisitor.php
++++ b/src/Support/NodeVisitor.php
+@@ -33,11 +33,18 @@ class NodeVisitor extends NodeVisitorAbstract
+             foreach ($node->getAttribute('comments') as $comment) { // @phpstan-ignore-line
+                 preg_match('/@pest-mutate-ignore(.*)/', (string) $comment->getText(), $matches); // @phpstan-ignore-line
+                 if ($matches !== []) {
+-                    if ($matches[1] === '') {
++                    // Trim BEFORE testing for empty. `(.*)` captures the rest of the line,
++                    // so a bare marker followed by a space, or a docblock's own ` */`,
++                    // yields a non-empty tail that then matches no mutator name and
++                    // suppresses nothing - inverting the bare form's meaning on whitespace
++                    // alone. A formatter that strips trailing whitespace can flip it back.
++                    $mutatorsToIgnore = trim($matches[1], " \t\n\r*/:");
++
++                    if ($mutatorsToIgnore === '') {
+                         return NodeTraverser::DONT_TRAVERSE_CURRENT_AND_CHILDREN;
+                     }
+ 
+-                    if (in_array($this->mutator::name(), array_map(fn (string $mutatorToIgnore): string => trim($mutatorToIgnore, ' */:'), explode(',', $matches[1])), true)) {
++                    if (in_array($this->mutator::name(), array_map(fn (string $mutatorToIgnore): string => trim($mutatorToIgnore, ' */:'), explode(',', $mutatorsToIgnore)), true)) {
+                         return NodeTraverser::DONT_TRAVERSE_CURRENT_AND_CHILDREN;
+                     }
+                 }

@@ -1,0 +1,62 @@
+# Pin working-tree and committed text to LF. Without this file, every
+# checkout follows the machine's `core.autocrlf`. Git for Windows defaults
+# that to `true`, so a contributor inherits a tree where every first-party
+# text file is rewritten from this repository's LF to CRLF, and the
+# corruption does not announce itself as a line-ending problem (Pint
+# `line_ending` fixers, YAML/frontmatter parsers seeing `\r`, line-based
+# tests). A committed `eol=lf` outranks `core.autocrlf`.
+#
+# `text=auto` still detects binary content and leaves it alone. Repositories
+# may add more specific lines under this (diff drivers, `export-ignore`,
+# `merge=union` for an append-only decision log); keep this line first.
+* text=auto eol=lf
+
+*.php text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.xml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.neon text eol=lf
+*.dist text eol=lf
+
+*.png -text
+*.gif -text
+*.jpg -text
+*.jpeg -text
+*.webp -text
+*.ico -text
+*.pdf -text
+*.zip -text
+
+# Development-only paths stay out of `git archive` and release packaging.
+/.gitattributes export-ignore
+/.github/ export-ignore
+/composer.lock export-ignore
+/phpstan.neon.dist export-ignore
+/phpunit.xml export-ignore
+/pint.json export-ignore
+/rector-sweep.php export-ignore
+/rector.php export-ignore
+/tests/ export-ignore
+/vendor/ export-ignore
+/patches/ export-ignore
+/patches.json export-ignore
+/patches.lock.json export-ignore
+/.npmrc export-ignore
+/package.json export-ignore
+/package-lock.json export-ignore
+/scripts/ export-ignore
+/vitest.config.js export-ignore
+/vite.config.js export-ignore
+
+# Append-only decision log: two branches that each add an entry merge without a conflict.
+/docs/DECISIONS.md merge=union
+/.editorconfig export-ignore
+/.githooks/ export-ignore
+/docs/ export-ignore
+/.claude/ export-ignore
+/.agents/ export-ignore
+/.cursor/ export-ignore
+/AGENTS.md export-ignore
+/.gitignore export-ignore

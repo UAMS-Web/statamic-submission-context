@@ -1,0 +1,37 @@
+--- a/src/MutationTest.php
++++ b/src/MutationTest.php
+@@ -87,6 +87,34 @@
+         // remove coverage arguments from the original arguments
+         $filteredArguments = array_filter($originalArguments, fn (string $argument): bool => ! str_starts_with($argument, '--coverage'));
+ 
++        // Drop the run's own --filter as well. The child gets its own --filter below, and PHPUnit
++        // warns "Option --filter cannot be used more than once" and exits 1 even when every test
++        // passes, so hasFinished() scored every mutant of a `--filter` run killed. The covering
++        // tests were collected from the filtered run, so they are already inside that selection.
++        // See uams-statamic#2570.
++        $withoutRunFilter = [];
++        $skipValue = false;
++        foreach ($filteredArguments as $argument) {
++            if ($skipValue) {
++                $skipValue = false;
++
++                continue;
++            }
++
++            if ($argument === '--filter') {
++                $skipValue = true;
++
++                continue;
++            }
++
++            if (str_starts_with($argument, '--filter=')) {
++                continue;
++            }
++
++            $withoutRunFilter[] = $argument;
++        }
++        $filteredArguments = $withoutRunFilter;
++
+         // TODO: filter arguments to remove unnecessary stuff (Teamcity, Coverage, etc.)
+         $process = new Process(
+             command: [

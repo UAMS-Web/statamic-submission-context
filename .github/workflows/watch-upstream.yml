@@ -1,0 +1,214 @@
+name: Watch upstream fixes
+
+# A scheduled watch on the upstream fixes this repository is waiting on, for example the
+# `pestphp/pest-plugin-mutate` defects the files in `patches/` work around. For each
+# (tracking issue -> upstream issue or pull request) row in `.github/upstream-watches/` it runs the
+# check a person would: has the maintainer acted (issue closed, pull request merged or closed), and,
+# where a local patch is carried, has a fixed release shipped to Packagist past the version
+# installed, or, for a row with `released: true`, has the release carrying a merged pull request
+# shipped on its line. It comments on the tracking issue ONLY when a signal moves. Closing a
+# tracking issue turns its watch off.
+#
+# To track another upstream, add one file to `.github/upstream-watches/` and a note to its
+# README.md; nothing else changes. Each row is its own file so that two pull requests adding rows
+# never conflict.
+#
+# Two rows under ONE tracker couple their watches, because closing a tracker turns its watch off.
+# Give threads separate trackers whenever either can outlive the other. The sentinel below is per
+# signal rather than per tracker for the same reason: one tracker can carry several upstream rows,
+# and a per-tracker marker would let the first trip silence the second.
+#
+# Adapted from the copy in UAMS-Web/uams-statamic.
+#
+# COST. No Claude invocation, a handful of `gh` + `curl` calls, seconds of runner time per day. A
+# repository with no rows exits at the first step with a notice, so adopting the workflow before
+# the first patch needs a tracking issue costs nothing and never fails a scheduled run.
+#
+# It deliberately does NOT mention @claude: an Action using the default GITHUB_TOKEN cannot trigger
+# another workflow (GitHub blocks Action-to-Action recursion). It tags the human, who pulls the trigger.
+#
+# Notification policy: comment on CHANGE only, and only once per signal (first trip, then silent - a
+# standing change does not re-notify daily); plus a once-a-week Monday heartbeat per open tracker so
+# "still watching, nothing yet" is visible without daily no-news spam. GitHub's own participant
+# notifications cover intermediate maintainer chatter (a review comment); this watch covers the terminal
+# signal (merged / closed / released).
+
+on:
+  schedule:
+    # 14:41 UTC daily = ~09:41 America/Chicago (CDT). Off the :00 mark, which GitHub delays under load.
+    - cron: '41 14 * * *'
+  workflow_dispatch: {}   # allow a manual run (to test the logic without waiting for the cron)
+
+# Least-privilege: read the repo (for composer.lock) and comment on the tracking issues. Nothing else.
+permissions:
+  contents: read
+  issues: write
+
+# One watch run at a time; never cancel an in-flight run.
+concurrency:
+  group: watch-upstream
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Check each upstream, notify its tracker only on change
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # One file per upstream we're waiting on, in `.github/upstream-watches/` (UAMS-Web/uams-statamic#2673). The loader
+          # validates every file and fails the run when there are none or one is malformed, so a wrong
+          # path can never read as "nothing to watch". Each row's reasoning is in that directory's
+          # README.md.
+          if ! compgen -G ".github/upstream-watches/*.json" > /dev/null; then
+            echo "::notice::No rows in .github/upstream-watches/; nothing to watch."
+            exit 0
+          fi
+
+          WATCHES=$(node scripts/load-upstream-watches.mjs .github/upstream-watches)
+          echo "Watching $(echo "$WATCHES" | jq length) row(s)."
+
+          dow=$(date -u +%u)   # 1 = Monday (UTC), the weekly-heartbeat day.
+
+          # Idempotency: the sentinel is per-SIGNAL, not per-tracker, because one tracker can carry
+          # several upstream rows (UAMS-Web/uams-statamic#1729 has two). A per-tracker marker would let the first trip
+          # permanently silence the second, so a merged PR could go unreported because the issue had
+          # already closed weeks earlier. Keyed by repo#number, each signal notifies exactly once.
+          sentinel_for() { printf '<!-- watch-upstream:tripped:%s#%s -->' "$1" "$2"; }
+
+          # Walk unique trackers so a tracker with several rows gets ONE comment per run rather than one
+          # comment per row.
+          for tracker in $(echo "$WATCHES" | jq -r '[.[].tracker] | unique | .[]'); do
+            echo "::group::Tracking #$tracker"
+
+            # Off-switch: a closed tracker ends its watch. Fetch into a var first so a `gh` failure
+            # aborts cleanly under `set -e` rather than mis-branching.
+            tracker_state=$(gh issue view "$tracker" --json state --jq .state)
+            if [ "$tracker_state" = "CLOSED" ]; then
+              echo "Tracking #$tracker is closed - watch complete, skipping."
+              echo "::endgroup::"
+              continue
+            fi
+
+            # Fetch the tracker's existing comments ONCE; every sentinel check below reads this.
+            existing=$(gh issue view "$tracker" --json comments --jq '.comments[].body')
+
+            new_reasons=""
+            new_sentinels=""
+            watched_list=""
+
+            while read -r w; do
+              repo=$(echo "$w" | jq -r '.repo')
+              kind=$(echo "$w" | jq -r '.kind')
+              number=$(echo "$w" | jq -r '.number')
+              composer=$(echo "$w" | jq -r '.composer // empty')
+              released=$(echo "$w" | jq -r '.released // false')
+              merge_sha=""
+              base_ref=""
+              watched_list="${watched_list}- \`$repo\`#$number\n"
+
+              reason=""
+
+              # Signal A - the maintainer acting on the upstream issue/PR (the terminal state).
+              if [ "$kind" = "issue" ]; then
+                up_state=$(gh issue view "$number" -R "$repo" --json state --jq .state)
+                echo "Upstream issue $repo#$number: $up_state"
+                if [ "$up_state" = "CLOSED" ]; then
+                  reason="- Upstream issue \`$repo\`#$number is now **CLOSED**.\n"
+                fi
+              else
+                pr_json=$(gh pr view "$number" -R "$repo" --json state,mergedAt,mergeCommit,baseRefName)
+                up_state=$(echo "$pr_json" | jq -r '.state')
+                merge_sha=$(echo "$pr_json" | jq -r '.mergeCommit.oid // empty')
+                base_ref=$(echo "$pr_json" | jq -r '.baseRefName // empty')
+                echo "Upstream PR $repo#$number: $up_state"
+                if [ "$up_state" = "MERGED" ]; then
+                  reason="- Upstream PR \`$repo\`#$number was **MERGED**.\n"
+                elif [ "$up_state" = "CLOSED" ]; then
+                  reason="- Upstream PR \`$repo\`#$number was **CLOSED without merging** - the maintainer declined or superseded it.\n"
+                fi
+              fi
+
+              # Signal A is notified once per signal.
+              if [ -n "$reason" ]; then
+                s=$(sentinel_for "$repo" "$number")
+                if printf '%s' "$existing" | grep -qF "$s"; then
+                  echo "Already notified for $repo#$number - skipping."
+                else
+                  new_reasons="${new_reasons}${reason}"
+                  new_sentinels="${new_sentinels}${s}"
+                fi
+              fi
+
+              # Signal C - a merged pull request's fix reaching a release (rows with `released: true`,
+              # UAMS-Web/uams-statamic#2727). A merge does not retire a patch; the first release carrying it does. The check
+              # takes the newest stable tag on the pull request's base-branch line (a `13.x` fix is
+              # never in a `12.x` tag) and asks the compare API whether it contains the merge commit.
+              # It posts once, under its own sentinel, separate from the MERGED one. A failed check
+              # fails the run rather than reading as "not released yet".
+              if [ "$released" = "true" ] && [ "$kind" = "pr" ] && [ "$up_state" = "MERGED" ] && [ -n "$merge_sha" ] && [ -n "$base_ref" ]; then
+                s=$(sentinel_for "$repo" "$number-released")
+                if printf '%s' "$existing" | grep -qF "$s"; then
+                  echo "Already notified for the release carrying $repo#$number - skipping."
+                else
+                  check=$(node scripts/check-upstream-release.mjs "$repo" "$base_ref" "$merge_sha")
+                  tag=$(echo "$check" | jq -r '.tag // empty')
+                  echo "Release check $repo#$number: $check"
+                  if [ "$(echo "$check" | jq -r '.released')" = "true" ]; then
+                    new_reasons="${new_reasons}- \`$repo\` **$tag**, the newest release on the \`$base_ref\` line, contains the merge commit of \`$repo\`#$number - check whether the local patch can now be dropped.\n"
+                    new_sentinels="${new_sentinels}${s}"
+                  fi
+                fi
+              fi
+
+              # Signal B - a Packagist release past what we have installed (rows naming a package only).
+              # This is the condition that retires the local patch in `patches/`, so it earns its own
+              # notification even when the PR has not visibly moved: a maintainer can land an equivalent
+              # fix without ever touching our PR.
+              if [ -n "$composer" ]; then
+                # `// empty` + the guard below skip cleanly if the package leaves the lock entirely.
+                pin=$(jq -r --arg p "$composer" '[.packages[], ."packages-dev"[]] | map(select(.name == $p)) | .[0].version // empty' composer.lock)
+                latest=$(curl -sS "https://repo.packagist.org/p2/${composer}.json" \
+                  | jq -r --arg p "$composer" '[.packages[$p][].version] | map(select(test("^v?[0-9]+\\.[0-9]+\\.[0-9]+$"))) | .[0] // empty')
+                echo "composer $composer: installed ${pin:-<none>}, latest stable ${latest:-<unknown>}"
+                if [ -n "$pin" ] && [ -n "$latest" ]; then
+                  # Version-aware compare (not a bare !=) so a formatting difference between the lock and
+                  # Packagist - a `v` prefix on one side only - cannot fire a false notification.
+                  newest=$(printf '%s\n%s\n' "${pin#v}" "${latest#v}" | sort -V | tail -1)
+                  if [ "${latest#v}" = "$newest" ] && [ "${latest#v}" != "${pin#v}" ]; then
+                    s=$(sentinel_for "$composer" "release-$latest")
+                    if printf '%s' "$existing" | grep -qF "$s"; then
+                      echo "Already notified for $composer $latest - skipping."
+                    else
+                      new_reasons="${new_reasons}- Packagist published \`$composer\` **$latest**, past our installed **$pin** - check whether it carries the fix and retires \`patches/\`.\n"
+                      new_sentinels="${new_sentinels}${s}"
+                    fi
+                  fi
+                fi
+              fi
+            done < <(echo "$WATCHES" | jq -c --argjson t "$tracker" '.[] | select(.tracker == $t)')
+
+            if [ -n "$new_reasons" ]; then
+              body=$(printf '%s\n\n@joshdaugherty - the upstream work this issue tracks moved:\n\n%b\nReply here with `@claude` to action the follow-up (bump / drop the local patch / verify), then close this issue to stop the watch.\n\n_- scheduled `watch-upstream` workflow_' "$new_sentinels" "$new_reasons")
+              gh issue comment "$tracker" --body "$body"
+              echo "Posted change notification on #$tracker."
+            elif [ "$dow" = "1" ]; then
+              # Weekly Monday heartbeat - one per tracker, listing everything it watches.
+              body=$(printf 'Weekly watch - no change yet on:\n\n%b\nWill comment the moment a maintainer acts (merge / close) or a fixed release ships.\n\n_- scheduled `watch-upstream` workflow_' "$watched_list")
+              gh issue comment "$tracker" --body "$body"
+              echo "Posted weekly heartbeat on #$tracker."
+            else
+              echo "No change on #$tracker; not heartbeat day - silent."
+            fi
+            echo "::endgroup::"
+          done

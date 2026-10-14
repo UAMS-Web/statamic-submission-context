@@ -1,0 +1,82 @@
+--- a/src/Mutation.php
++++ b/src/Mutation.php
+@@ -48,8 +48,7 @@
+         array $modifiedAst,
+     ): self {
+         $modifiedSource = (new Standard)->prettyPrintFile($modifiedAst);
+-        $modifiedSourcePath = self::TMP_FOLDER.DIRECTORY_SEPARATOR.hash('xxh3', $modifiedSource);
+-        file_put_contents($modifiedSourcePath, $modifiedSource);
++        $modifiedSourcePath = self::writeModifiedSource(self::TMP_FOLDER, $modifiedSource);
+ 
+         $parser = PhpParserFactory::make();
+         $orignalAst = $parser->parse($file->getContents());
+@@ -81,6 +80,54 @@
+         );
+     }
+ 
++    /**
++     * Write a mutated source into the directory and return its path, creating the directory when
++     * it is missing. A failed write throws: unchecked, it left no mutant applied while the run
++     * still printed a score and exited 0. See uams-statamic#2812 and pestphp/pest#1942.
++     */
++    public static function writeModifiedSource(string $directory, string $modifiedSource): string
++    {
++        $path = $directory.DIRECTORY_SEPARATOR.hash('xxh3', $modifiedSource);
++        $error = 'unknown error';
++
++        set_error_handler(static function (int $level, string $message) use (&$error): bool {
++            $error = $message;
++
++            return true;
++        });
++
++        try {
++            if (! is_dir($directory) && ! mkdir($directory, 0777, true) && ! is_dir($directory)) {
++                throw new \RuntimeException(sprintf('Unable to create the mutations directory [%s]: %s', $directory, $error));
++            }
++
++            if (file_put_contents($path, $modifiedSource) === false) {
++                throw new \RuntimeException(sprintf('Unable to write the mutated source to [%s]: %s', $path, $error));
++            }
++        } finally {
++            restore_error_handler();
++        }
++
++        return $path;
++    }
++
++    /**
++     * Whether every mutation's mutated source is still on disk. A cached set whose files were
++     * removed must be regenerated rather than run. See uams-statamic#2812.
++     *
++     * @param  array<int, self>  $mutations
++     */
++    public static function modifiedSourcesExist(array $mutations): bool
++    {
++        foreach ($mutations as $mutation) {
++            if (! is_file($mutation->modifiedSourcePath)) {
++                return false;
++            }
++        }
++
++        return true;
++    }
++
+     public function modifiedSource(): string
+     {
+         $source = file_get_contents($this->modifiedSourcePath);
+--- a/src/Support/MutationGenerator.php
++++ b/src/Support/MutationGenerator.php
+@@ -66,7 +66,11 @@
+ 
+         $cache = MutationCache::instance();
+         foreach ($mutators as $mutator) {
+-            if ($cache->has($file, $contents, $linesToMutate, $mutator)) {
++            // A cached mutation points at a mutated source in .temp/mutations. When that file is
++            // gone, the child cannot load the mutant, fails, and is scored a kill, so regenerate.
++            // See uams-statamic#2812.
++            if ($cache->has($file, $contents, $linesToMutate, $mutator)
++                && Mutation::modifiedSourcesExist($cache->get($file, $contents, $linesToMutate, $mutator))) {
+                 $newMutations = $cache->get($file, $contents, $linesToMutate, $mutator);
+             } else {
+                 $newMutations = [];

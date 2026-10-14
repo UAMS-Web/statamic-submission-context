@@ -1,0 +1,32 @@
+#!/bin/sh
+#
+# Pre-commit gates for drift that no test can see. Each reports on its own, so a
+# commit that trips both is told about both.
+#
+# Installed via `git config core.hooksPath .githooks`, wired automatically from
+# composer post-install/post-update (scripts/setup-git-hooks.php).
+
+status=0
+
+staged=$(git diff --cached --name-only)
+
+# --- Gate 1: composer.json and composer.lock must change together -----------
+echo "$staged" | grep -qxF "composer.json" && json=1 || json=0
+echo "$staged" | grep -qxF "composer.lock" && lock=1 || lock=0
+
+if [ "$json" -eq 1 ] || [ "$lock" -eq 1 ]; then
+    if ! composer validate --no-check-publish --no-check-all >/dev/null 2>&1; then
+        echo "pre-commit: composer.json and composer.lock have drifted apart." >&2
+        echo "Run 'composer update --lock' and stage composer.lock." >&2
+        status=1
+    fi
+fi
+
+# --- Gate 2: the decision log stays in order --------------------------------
+if echo "$staged" | grep -qxF "docs/DECISIONS.md"; then
+    if command -v node >/dev/null 2>&1; then
+        node scripts/check-decision-log-order.mjs || status=1
+    fi
+fi
+
+exit $status

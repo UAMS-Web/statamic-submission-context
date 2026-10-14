@@ -1,0 +1,57 @@
+name: Check required checks
+
+# Fails when `main`'s required status checks and the workflows' job names drift apart (#11).
+# `scripts/check-required-checks.mjs` has the rules. In short: a required name no job reports
+# blocks every pull request, so it is always an error; a job the ruleset does not require is a
+# warning on a pull request (the ruleset can only be edited around the merge) and an error on a
+# push to `main` or the weekly run, which is the reminder to edit it.
+#
+# Order that works: to add a job, merge it, then add its name to the ruleset. To remove one, take
+# its name out of the ruleset first, then merge the pull request.
+#
+# The required list is read from the repository's effective rules, which a public repository
+# serves without a credential, so the default token (or none) is enough. The weekly run catches
+# a ruleset edited by hand with no pull request involved.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 14 * * 1'
+  workflow_dispatch:
+
+# Nothing at the workflow level; the one job states the scopes it needs.
+permissions: {}
+
+jobs:
+  check:
+    name: Required checks (ruleset matches jobs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # Node 22 bundles npm 10.9.x, below the `engines.npm` floor that `.npmrc`'s
+      # engine-strict enforces, so `npm ci` refuses to run without this pin.
+      - name: Pin npm to the engines floor
+        run: npm install -g npm@^11.10.0
+
+      - run: npm ci
+
+      - name: Compare the ruleset with the job names
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          gh api "repos/$REPO/rules/branches/main" > "$RUNNER_TEMP/rules.json"
+          strict=""
+          if [ "$EVENT" != "pull_request" ]; then strict="--strict"; fi
+          node scripts/check-required-checks.mjs $strict "$RUNNER_TEMP/rules.json" .github/workflows

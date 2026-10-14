@@ -1,0 +1,110 @@
+{
+    "name": "uams-web/statamic-addon-template",
+    "description": "Starting point for UAMS Statamic add-ons. Replace this description when you start an add-on from it.",
+    "keywords": [
+        "statamic",
+        "statamic-addon"
+    ],
+    "type": "statamic-addon",
+    "homepage": "https://github.com/UAMS-Web/statamic-addon-template",
+    "authors": [
+        {
+            "name": "UAMS Web Services"
+        },
+        {
+            "name": "Josh Daugherty",
+            "role": "Web Developer"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/UAMS-Web/statamic-addon-template/issues",
+        "source": "https://github.com/UAMS-Web/statamic-addon-template"
+    },
+    "autoload": {
+        "psr-4": {
+            "UAMSWeb\\AddonTemplate\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "UAMSWeb\\AddonTemplate\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "statamic": {
+            "name": "Addon Template",
+            "description": "Replace this description when you start an add-on from the template."
+        },
+        "laravel": {
+            "providers": [
+                "UAMSWeb\\AddonTemplate\\ServiceProvider"
+            ]
+        },
+        "composer-exit-on-patch-failure": true
+    },
+    "require": {
+        "php": "^8.4",
+        "statamic/cms": "^6.35"
+    },
+    "require-dev": {
+        "cweagans/composer-patches": "^2.0",
+        "driftingly/rector-laravel": "^2.6",
+        "larastan/larastan": "^3.13",
+        "laravel/pint": "^1.32",
+        "orchestra/testbench": "^11.3",
+        "pestphp/pest": "^5.3",
+        "pestphp/pest-plugin-phpstan": "^5.2",
+        "rector/rector": "^2.7"
+    },
+    "config": {
+        "sort-packages": true,
+        "platform": {
+            "php": "8.4.1"
+        },
+        "allow-plugins": {
+            "cweagans/composer-patches": true,
+            "pestphp/pest-plugin": true,
+            "pixelfear/composer-dist-plugin": true
+        }
+    },
+    "scripts": {
+        "post-install-cmd": "@php -r \"is_file('scripts/setup-git-hooks.php') && require 'scripts/setup-git-hooks.php';\"",
+        "post-update-cmd": "@php -r \"is_file('scripts/setup-git-hooks.php') && require 'scripts/setup-git-hooks.php';\"",
+        "test": "pest --parallel --testsuite=Unit,Integration",
+        "test:tia": "pest --tia --locally",
+        "test:serial": "pest --testsuite=Unit,Integration",
+        "stan": "phpstan analyse --no-progress --memory-limit=2G",
+        "test:mutate-ignore": "@php scripts/check-mutate-ignore.php",
+        "test:parallel-safe": "@php scripts/check-parallel-safe-tests.php",
+        "test:bands": [
+            "@php scripts/check-skip-baseline.php --report=junit-parallel.xml --band=parallel",
+            "@php scripts/check-slowest-class.php --report=junit-parallel.xml --band=parallel"
+        ],
+        "test:scripts": [
+            "node scripts/check-no-emoji.mjs",
+            "node scripts/check-decision-log-order.mjs",
+            "npm run test:scripts"
+        ],
+        "ci": [
+            "@test:scripts",
+            "@test:mutate-ignore",
+            "@test:parallel-safe",
+            "@test:pint",
+            "@test:refactor",
+            "@stan",
+            "@test"
+        ],
+        "refactor": "rector",
+        "refactor:sweep": "rector --clear-cache --config=rector-sweep.php",
+        "test:refactor": "rector --dry-run",
+        "test:refactor:sweep": "rector --dry-run --clear-cache --config=rector-sweep.php",
+        "pint": "pint",
+        "test:pint": "pint --test",
+        "mutate": [
+            "Composer\\Config::disableProcessTimeout",
+            "@php vendor/bin/pest --mutate --path=src"
+        ]
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
