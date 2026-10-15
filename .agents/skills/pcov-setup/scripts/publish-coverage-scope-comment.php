@@ -12,21 +12,27 @@ declare(strict_types=1);
  * comment size budget (~65 KiB) publish a summary + progress table plus a
  * directory roll-up; the CSV on disk remains the full source.
  *
+ * The comment goes to the repository of the checkout's `origin` remote unless
+ * `--repo` names another. When no GitHub `origin` resolves and `--repo` is
+ * absent, the script exits 1 before writing anything. The resolved repository
+ * and issue are printed to stderr before the first write.
+ *
  * Usage:
- *   php publish-coverage-scope-comment.php --issue=2834 [--repo=UAMS-Web/uams-statamic] [--csv=<path>] [--root=<path>]
- * Exit: 0 = published, 1 = bad args / missing csv, 2 = root not found, 3 = gh failed.
+ *   php publish-coverage-scope-comment.php --issue=<number> --pass2-min=<N> [--repo=<owner>/<name>] [--csv=<path>] [--root=<path>]
+ * `--pass2-min` is required: the pass 3 eligibility bar is the repository's own
+ * pass 2 floor, measured from its finished pass 2 rows, and no other repository's
+ * value stands in for it. A run without it exits 1 before writing anything.
+ * Exit: 0 = published, 1 = bad args / missing csv / no repository / no --pass2-min, 2 = root not found, 3 = gh failed.
  */
 const TRACKER_MARKER = '<!-- coverage-scope-tracker -->';
 const COMMENT_BUDGET = 60000;
-/** Default pass-3 eligibility floor: p25 of finished pass-2 distribution (#2834). */
-const DEFAULT_PASS2_MIN = 86.7;
 
 $arguments = array_slice($argv, 1);
 $issue = null;
-$repo = 'UAMS-Web/uams-statamic';
+$repo = null;
 $csvPath = null;
 $rootOverride = null;
-$pass2Min = DEFAULT_PASS2_MIN;
+$pass2Min = null;
 
 foreach ($arguments as $argument) {
     if (str_starts_with($argument, '--issue=')) {
@@ -38,9 +44,10 @@ foreach ($arguments as $argument) {
     } elseif (str_starts_with($argument, '--root=')) {
         $rootOverride = substr($argument, strlen('--root='));
     } elseif (str_starts_with($argument, '--pass2-min=')) {
-        $pass2Min = (float) substr($argument, strlen('--pass2-min='));
+        $pass2MinValue = substr($argument, strlen('--pass2-min='));
+        $pass2Min = is_numeric($pass2MinValue) ? (float) $pass2MinValue : false;
     } elseif ($argument === '--help' || $argument === '-h') {
-        fwrite(STDOUT, "Usage: php publish-coverage-scope-comment.php --issue=N [--repo=org/name] [--csv=<path>] [--root=<path>] [--pass2-min=86.7]\n");
+        fwrite(STDOUT, "Usage: php publish-coverage-scope-comment.php --issue=N [--repo=<owner>/<name>] [--csv=<path>] [--root=<path>] --pass2-min=<N>\n");
 
         exit(0);
     } else {
@@ -52,6 +59,12 @@ foreach ($arguments as $argument) {
 
 if ($issue === null || $issue === '') {
     fwrite(STDERR, "publish-coverage-scope-comment: --issue=N is required\n");
+
+    exit(1);
+}
+
+if ($pass2Min === null || $pass2Min === false) {
+    fwrite(STDERR, 'publish-coverage-scope-comment: --pass2-min=<N> '.($pass2Min === false ? 'must be a number' : 'is required').": it is this repository's own pass 2 floor, and the comment prints it as the pass 3 bar\n");
 
     exit(1);
 }
@@ -76,6 +89,20 @@ if (! is_file($csvPath)) {
 
     exit(1);
 }
+
+if ($repo === null || $repo === '') {
+    $repo = resolveOriginRepository($root);
+    if ($repo === null) {
+        fwrite(STDERR, "publish-coverage-scope-comment: no GitHub origin remote found in {$root}; pass --repo=<owner>/<name>\n");
+
+        exit(1);
+    }
+    $repoSource = 'origin remote';
+} else {
+    $repoSource = '--repo';
+}
+
+fwrite(STDERR, "publish-coverage-scope-comment: target {$repo}#{$issue} (from {$repoSource})\n");
 
 $rows = readCsvRows($csvPath);
 $csvDisplay = normalizeRel($root, $csvPath);
@@ -408,7 +435,28 @@ function deleteIssueComment(string $repo, string $commentId): void
 }
 
 /**
- * Run `gh` and capture stdout/stderr.
+ * The `owner/name` of the checkout's `origin` remote when its host is exactly
+ * github.com (https, ssh:// or scp-style form, with or without credentials),
+ * read from git alone so it spends no API quota. The host is anchored on the
+ * left so a host that merely ends in github.com, and a local path containing
+ * `github.com/`, resolve to nothing.
+ */
+function resolveOriginRepository(string $root): ?string
+{
+    [$exit, $stdout] = runGh(['git', '-C', $root, 'remote', 'get-url', 'origin'], null);
+    if ($exit !== 0) {
+        return null;
+    }
+
+    if (preg_match('~^(?:(?:https?|ssh|git)://(?:[^@/]+@)?|[^@/:]+@)github\.com[:/]([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$~', trim($stdout), $match) !== 1) {
+        return null;
+    }
+
+    return $match[1].'/'.$match[2];
+}
+
+/**
+ * Run a command (`gh` or `git`) and capture stdout/stderr.
  *
  * @param  list<string>  $cmd
  * @return array{0: int, 1: string, 2: string}

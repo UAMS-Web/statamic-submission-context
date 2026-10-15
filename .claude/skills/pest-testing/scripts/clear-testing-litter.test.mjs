@@ -1,3 +1,4 @@
+// cspell:ignore Stache stache
 // Tests for clear-testing-litter.mjs (UAMS-Web/uams-claude-skills#118). Each case builds a
 // throwaway repository root and runs the script as a child process with `php` and `git`
 // replaced by stubs on PATH, so no Laravel application, PHP or real checkout is needed. The

@@ -10,7 +10,8 @@ description: >-
   WordPressCS's security sniffs beside Pint, restricting the tools to our modifications in a fork
   of a vendor plugin, and what to do with a finding you disagree with. Activate when adding or
   running Rector, PHPStan, Larastan or Pint in a PHP repository, fixing what they report, deciding
-  or changing a static-analysis level, or writing a repository's code-quality adoption ticket.
+  or changing a static-analysis level, wiring a committed pre-commit hook into every clone from
+  Composer, or writing a repository's code-quality adoption ticket.
 ---
 <!--
   Synced from UAMS-Web/uams-claude-skills: shared/.claude/skills/code-quality/SKILL.md
@@ -49,6 +50,8 @@ The templates beside this skill are the shared starting configurations. Each rep
 | `templates/pint.json` | repository root | every repository |
 | `templates/phpcs.xml.dist` | repository root | only a repository that keeps WordPressCS |
 | `templates/.git-blame-ignore-revs` | repository root | every repository, at the reformat commit |
+| `templates/setup-git-hooks.php` | `scripts/setup-git-hooks.php` | a Composer repository that commits a `.githooks/pre-commit` |
+| `templates/pre-commit` | `.githooks/pre-commit`, executable | a Composer repository that commits a pre-commit hook |
 
 ## Adding the tools to a repository
 
@@ -104,7 +107,7 @@ Add the cache directory the template names to `.gitignore` (`/.phpstan/`, or `/s
 
 The shared `templates/pint.json` turns on `declare_strict_types`. That is not only a formatting choice: after the first full Pint run, files gain `declare(strict_types=1);`, and built-in PHP functions then reject bad argument types with `TypeError` instead of coercing. PHPStan will also start reporting untyped arguments passed to those built-ins (often a large set at higher levels). Adopters must know this before the first repository-wide Pint run; budget for the runtime and analyzer fallout in the adoption ticket, or temporarily leave the rule off in that repository's `pint.json` only with a recorded reason (and expect the shared template to keep it on).
 
-For Laravel and Statamic, uncomment the `LaravelSetProvider` block in `rector.php`. For WordPress, uncomment `ArrayToFirstClassCallableRector::class` in the sweep-only list and the matching `use Rector\Php81\Rector\Array_\ArrayToFirstClassCallableRector;` at the top of `rector.php` (never inside the array: a `use` there is a parse error). WordPress matches hook callbacks by identity, so a first-class callable silently breaks `remove_action()` (D-016).
+For Laravel and Statamic, uncomment the `withComposerBased()` call in `rector.php` (Rector 2.6.5 or later; it no longer needs a `withSetProviders()` line, and a repository on Rector 2.6.4 or earlier keeps that line). For WordPress, uncomment `ArrayToFirstClassCallableRector::class` in the sweep-only list and the matching `use Rector\Php81\Rector\Array_\ArrayToFirstClassCallableRector;` at the top of `rector.php` (never inside the array: a `use` there is a parse error). WordPress matches hook callbacks by identity, so a first-class callable silently breaks `remove_action()` (D-016).
 
 WordPress PHPStan notes (see comments in `templates/phpstan-wordpress.neon.dist`):
 
@@ -131,6 +134,42 @@ Rector often needs more than one apply pass before a dry-run is clean: after `co
 
 The gating and sweep profiles share one Rector cache. A dry-run of one profile right after the other can look like a no-op unless the cache is cleared. The `:sweep` scripts above pass `--clear-cache`; when switching the other way (sweep, then gate), run the gating command with `--clear-cache` as well (for example `vendor/bin/rector --clear-cache --dry-run`), or clear once before the first run of the new profile.
 
+### Git hooks
+
+A hook that each developer has to wire by hand is not a gate, as the `worktrees` rule says of its refresh gate. The two hook templates make the commit-time gate active in every clone that runs `composer install`, and in every linked worktree of it, because `core.hooksPath` lives in the clone's shared configuration (UAMS-Web/uams-claude-skills#162).
+
+Copy `templates/setup-git-hooks.php` to `scripts/setup-git-hooks.php` and `templates/pre-commit` to `.githooks/pre-commit`, make the hook executable (`chmod +x .githooks/pre-commit`; on Windows, `git update-index --chmod=+x .githooks/pre-commit` after staging it), commit both, and add the installer to the `scripts` section of `composer.json`:
+
+```json
+"scripts": {
+    "post-install-cmd": [
+        "@php scripts/setup-git-hooks.php"
+    ],
+    "post-update-cmd": [
+        "@php scripts/setup-git-hooks.php"
+    ]
+}
+```
+
+Where a repository already has either key, add the one line to the end of its array. Both are Composer's own events, so no other script entry is needed.
+
+**What the installer does.** It runs `git config core.hooksPath .githooks` for the project the script sits in, and prints one line when it changed the setting. It is quiet when the setting is already right, and it names the old value when it replaces another one. It never fails a Composer run: the exit status is always 0, and the only output it can add besides that line is a one-line warning on stderr when git refused the write. It does nothing in four cases, each of which is a clone where the setting would be wrong or pointless:
+
+- the project is not in a git work tree (a dist or tarball install);
+- the project is a subdirectory of another repository, since the setting would land in that repository's configuration;
+- `.githooks/pre-commit` is not tracked, so there is no hook to run;
+- the run is under GitHub Actions, where nobody commits from the checkout.
+
+**It agrees with the local CI runner on the command and the path.** The `local-ci` skill's runner prints one warning line when `.githooks/pre-commit` is tracked and `core.hooksPath` does not resolve to `.githooks`, and the line names `git config core.hooksPath .githooks`. The installer runs that command, on that path, under that same condition (a tracked hook, outside GitHub Actions), so a clone that ran `composer install` is a clone the warning stays silent for. A change to either side changes the other: do not rename the directory or the hook file in one place. `composer install --no-scripts` skips the installer, and the warning is what catches that clone.
+
+**What the hook does.** The generic gate runs `composer validate --no-check-publish` when `composer.json` or `composer.lock` is staged at the repository root, and refuses the commit when it fails; a lock file that no longer matches `composer.json` is the usual cause. It warns, and lets the commit through, when `composer` is not on `PATH`. Every gate runs even after one fails, so one commit attempt reports every problem. The hook reads the working tree, as the commands it runs do.
+
+**Repository gates** go in the marked place near the end of the hook, one block each, setting `status=1` instead of exiting so the blocks after it still run. Keep a gate there only if it reads the index and is quick, since the hook runs on every commit; a gate that runs the test suite belongs in the local CI runner. A gate that only one repository needs (keeping two mirrored files changing together, for one) stays in that repository's copy of the hook and is not proposed for the template.
+
+**When the repository also uses the `local-ci` skill's pre-commit guard against secret and personal-data files,** both want `.githooks/pre-commit`. Keep this template's hook there, save the guard's hook as `.githooks/guard-deny`, make it executable, and call it from a block of its own, as the comment at the end of the template shows. The guard reads `local-ci.json` from the working tree root, which is where hooks run.
+
+`git commit --no-verify` skips every gate, and a missing `vendor/` is not a reason to: bootstrap the clone instead, as the `worktrees` rule says.
+
 ### Local CI jobs
 
 Three jobs, one per tool, run before a pull request:
@@ -142,6 +181,19 @@ Three jobs, one per tool, run before a pull request:
 | `phpstan` | `composer stan` | any `.php` in the diff, tests included, because `phpstan.neon.dist` lists `tests` |
 
 This repository is public, so Actions minutes are free: run the three commands as steps of its CI workflow, and locally before pushing. A private repository without the local-ci runner yet does the same three commands locally before every push (or as workflow steps if minutes are acceptable); adopt local-ci when that skill is available in the checkout so gating stops depending on Actions.
+
+### The CI workflow template
+
+`templates/ci.yml` is the GitHub Actions form of the gate, with `templates/setup-action.yml` as the composite action it shares. Copy them once, the first to `.github/workflows/ci.yml` and the second to `.github/actions/setup/action.yml`, set the PHP version in the action, and rename a command if the repository's Composer script differs. The sync never writes `.github/`, so an existing `ci.yml` is never overwritten: a repository that already has one keeps it, and adopts the template's properties (below) by editing its own file. Job `name:` values are what a ruleset lists as required checks, so renaming a job means changing that list in the same change.
+
+What the template sets, and what to keep when adapting it:
+
+- `composer-validate` and `synced-files` run first and cheapest; `pint` follows them, `rector` and `phpstan` follow `pint`, and `pest` follows both, so a pull request that fails a cheap check does not spend minutes on the dear ones. The `synced-files` job runs the `synced-files` skill's check, and is the workflow form of the `synced-files` job in `local-ci.json`.
+- `timeout-minutes` on every job, so a hung step is cut off rather than billed until the platform limit.
+- `concurrency` keyed on the workflow and ref, cancelling in-progress runs for pull requests only, so a push replaces a stale run and `main` runs are never cancelled.
+- PHP, the Composer cache and the locked install live in the composite action, which `dependabot.yml` also covers (see the `update-dependencies-ticket` skill's `templates/dependabot.yml`).
+
+A mutation job and a spell-check job are not in the template: both stay with the repository that wants them.
 
 ## Finding the starting static-analysis level
 

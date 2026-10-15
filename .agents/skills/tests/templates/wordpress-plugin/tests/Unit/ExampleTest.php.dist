@@ -39,3 +39,5 @@ it('keeps the marker WordPress passed when there is no post to link to', functio
     'no post' => [false],
     'empty permalink' => [''],
 ]);
+
+// cspell:ignore hellip

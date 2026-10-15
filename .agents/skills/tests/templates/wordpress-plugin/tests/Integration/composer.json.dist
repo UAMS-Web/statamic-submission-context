@@ -15,5 +15,8 @@
     },
     "scripts": {
         "test": "phpunit"
+    },
+    "extra": {
+        "spell": "cspell:ignore yoast ."
     }
 }

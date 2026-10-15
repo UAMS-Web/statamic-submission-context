@@ -82,4 +82,4 @@ require $wpPhpunit.'/includes/bootstrap.php';
 
 require_once __DIR__.'/../Support/IntegrationTestCase.php';
 
-// cspell:ignore ABSPATH muplugins
+// cspell:ignore ABSPATH fwrite getenv muplugins preg putenv rtrim stylesheet

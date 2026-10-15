@@ -41,3 +41,5 @@ final class ExampleTest extends IntegrationTestCase
         }
     }
 }
+
+// cspell:ignore hellip

@@ -15,15 +15,15 @@ declare(strict_types=1);
  *   Prefer `--pass2 --batch=10` so each run covers the next 10 pending files
  *   via their referencing tests (avoids a multi-hour full-suite wait).
  * - `pass3_mutation_clean`: `yes` / `no (…)` / `n/a (…)` from class-scoped
- *   `pest --mutate` for rows with pass2 ≥ `--pass2-min` (default 86.7)
+ *   `pest --mutate` for rows with pass2 ≥ `--pass2-min` (required with
+ *   `--pass3`; this repository's own pass 2 floor, with no built-in value)
  *
  * Usage:
  *   php build-coverage-scope-csv.php --pass1
  *   php build-coverage-scope-csv.php --pass2 --batch=10
  *   php build-coverage-scope-csv.php --pass2 --clover=storage/app/coverage-clover.xml
- *   php build-coverage-scope-csv.php --pass3 --batch=1
- *   php build-coverage-scope-csv.php --pass3 --batch=1 --pass2-min=86.7
- * Exit: 0 = wrote (or counted), 1 = bad args / missing inputs, 2 = root not found,
+ *   php build-coverage-scope-csv.php --pass3 --batch=1 --pass2-min=<N>
+ * Exit: 0 = wrote (or counted), 1 = bad args / missing inputs / --pass3 without --pass2-min, 2 = root not found,
  *       3 = batch pest run failed (pass2 without clover / pass3 launch failure).
  */
 $arguments = array_slice($argv, 1);
@@ -38,7 +38,7 @@ $skeletonOnly = false;
 $countOnly = false;
 $passFlagSeen = false;
 $batchSize = null;
-$pass2Min = 86.7;
+$pass2Min = null;
 
 foreach ($arguments as $argument) {
     if (str_starts_with($argument, '--root=')) {
@@ -52,7 +52,8 @@ foreach ($arguments as $argument) {
     } elseif (str_starts_with($argument, '--batch=')) {
         $batchSize = max(1, (int) substr($argument, strlen('--batch=')));
     } elseif (str_starts_with($argument, '--pass2-min=')) {
-        $pass2Min = (float) substr($argument, strlen('--pass2-min='));
+        $pass2MinValue = substr($argument, strlen('--pass2-min='));
+        $pass2Min = is_numeric($pass2MinValue) ? (float) $pass2MinValue : false;
     } elseif ($argument === '--pass1') {
         $runPass1 = true;
         $passFlagSeen = true;
@@ -68,7 +69,7 @@ foreach ($arguments as $argument) {
     } elseif ($argument === '--count') {
         $countOnly = true;
     } elseif ($argument === '--help' || $argument === '-h') {
-        fwrite(STDOUT, "Usage: php build-coverage-scope-csv.php [--root=<path>] [--phpunit=<path>] [--out=<csv>] [--pass1] [--pass2] [--pass3] [--batch=N] [--pass2-min=86.7] [--clover=<file>] [--skeleton-only] [--count]\n");
+        fwrite(STDOUT, "Usage: php build-coverage-scope-csv.php [--root=<path>] [--phpunit=<path>] [--out=<csv>] [--pass1] [--pass2] [--pass3] [--batch=N] [--pass2-min=<N>] [--clover=<file>] [--skeleton-only] [--count]\n");
 
         exit(0);
     } else {
@@ -96,6 +97,18 @@ if ($runPass2 && $runPass3) {
 
 if ($batchSize !== null && ! $runPass2 && ! $runPass3) {
     fwrite(STDERR, "build-coverage-scope-csv: --batch=N requires --pass2 or --pass3\n");
+
+    exit(1);
+}
+
+if ($pass2Min === false) {
+    fwrite(STDERR, "build-coverage-scope-csv: --pass2-min=<N> must be a number\n");
+
+    exit(1);
+}
+
+if ($runPass3 && $pass2Min === null) {
+    fwrite(STDERR, "build-coverage-scope-csv: --pass3 requires --pass2-min=<N>: it is this repository's own pass 2 floor, and no other repository's value stands in for it\n");
 
     exit(1);
 }
@@ -433,6 +446,7 @@ foreach ($written as $cols) {
     if (
         $pass2Cell !== ''
         && $pass3Cell === ''
+        && $pass2Min !== null
         && (float) $pass2Cell >= $pass2Min
     ) {
         $pendingPass3++;
