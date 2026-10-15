@@ -188,7 +188,7 @@ This repository is public, so Actions minutes are free: run the three commands a
 
 What the template sets, and what to keep when adapting it:
 
-- `composer-validate` and `synced-files` run first and cheapest; `pint` follows them, `rector` and `phpstan` follow `pint`, and `pest` follows both, so a pull request that fails a cheap check does not spend minutes on the dear ones. The `synced-files` job runs the `synced-files` skill's check, and is the workflow form of the `synced-files` job in `local-ci.json`.
+- `composer-validate` and `synced-files` run first and cheapest; `pint` follows them, `rector` and `phpstan` follow `pint`, and `pest` follows both, so a pull request that fails a cheap check does not spend minutes on the dear ones. The `synced-files` job runs the `synced-files` skill's check, and is the workflow form of the `synced-files` job in `local-ci.json`. The `no-emoji` job stands outside that chain on purpose: it runs the `writing-comments` skill's `check-no-emoji.mjs` with Node alone, so it can be dropped or moved without touching another job.
 - `timeout-minutes` on every job, so a hung step is cut off rather than billed until the platform limit.
 - `concurrency` keyed on the workflow and ref, cancelling in-progress runs for pull requests only, so a push replaces a stale run and `main` runs are never cancelled.
 - PHP, the Composer cache and the locked install live in the composite action, which `dependabot.yml` also covers (see the `update-dependencies-ticket` skill's `templates/dependabot.yml`).

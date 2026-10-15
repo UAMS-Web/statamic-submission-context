@@ -17,6 +17,17 @@ name: CI
 # whether the code is sound, and whether the shared guidance is intact. The local CI runner
 # runs the same check as a `synced-files` job in local-ci.json.
 #
+# The no-emoji job sweeps the prose the no-emoji-in-durable-records rule names (.claude/, docs/,
+# README.md, AGENTS.md, CLAUDE.md) with the script the writing-comments skill ships. It is
+# self-contained: it needs nothing but Node and the synced rule, so it stands outside the
+# `needs:` chain and can be dropped or moved without touching another job.
+#
+# The mutate-ignore job runs the pest-testing skill's check for `@pest-mutate-ignore`
+# annotations that suppress nothing, or suppress everything. It reads the installed
+# pest-plugin-mutate, so it needs the locked install and belongs only in a repository that
+# runs Pest's `--mutate`; a repository without it drops the job. Do not add a second copy
+# of the check as a Composer script and a job.
+#
 # Jobs are chained with `needs:`, cheapest first, so a pull request that fails a cheap check
 # does not spend minutes on the dear ones. A skipped job is not a passing job: where a
 # ruleset requires these checks by name, a chain that stops early leaves the later ones
@@ -77,6 +88,20 @@ jobs:
       # Fails, naming the file, when a synced rule or skill was edited by hand.
       - run: node .claude/skills/synced-files/scripts/check-synced-files.mjs
 
+  no-emoji:
+    name: No emoji in durable records
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # Fails, naming the file, line and code point, when prose carries a banned glyph.
+      - run: node .claude/skills/writing-comments/scripts/check-no-emoji.mjs
+
   pint:
     name: Pint
     needs: [composer-validate, synced-files]
@@ -106,6 +131,20 @@ jobs:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
       - run: composer stan
+
+  mutate-ignore:
+    name: Mutation annotations (none inert)
+    needs: [pint]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+
+      # Fails, naming the file and line, on a bare marker, a tail that names no mutator,
+      # prose after a mutator list, and (on a CRLF runtime) a trailing marker. Prints the
+      # plugin revision its parsing model was measured against.
+      - run: php .claude/skills/pest-testing/scripts/check-mutate-ignore.php
 
   pest:
     name: Pest
