@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// cspell:ignore Stache stache
 // clear-testing-litter.mjs: clear the throwaway test state a killed Pest or mutate run
 // leaves under `storage/framework/testing`, then clear the application cache and the Stache
 // (UAMS-Web/uams-claude-skills#118).

@@ -138,6 +138,7 @@ Adopting this rule therefore required a decision on the release path, and the op
 - **No occurrence is permitted.** There is no single-exception carve-out, by name or by code point, in a pull-request body or anywhere else.
 - **Do not add it.** Bodies merged before the decision still carry it; the decision is forward-looking, and a retrospective sweep of them is a separate question.
 - **An audit expects ZERO.** A superseded form of this guidance told a sweep of pull-request bodies to expect exactly one hit each and to investigate only a *second* one. Once the footer was retired that guidance inverted: it made a body still carrying `U+1F916` the expected case, so a sweep run against it would report clean over the very thing the rule bans. Any occurrence is a violation.
+- **A workflow enforces it on every pull request.** The `check-attribution-footer` workflow and its script ship in the `writing-pull-requests` skill (`templates/` and `scripts/`), which a repository copies once to `.github/workflows/`. It fails a body carrying `U+1F916` or a session link.
 
 ## The DRY line
 

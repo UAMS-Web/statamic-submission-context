@@ -42,4 +42,4 @@ require_once __DIR__.'/../functions.php';
 
 tearDown();
 
-// cspell:ignore ABSPATH
+// cspell:ignore ABSPATH stylesheet

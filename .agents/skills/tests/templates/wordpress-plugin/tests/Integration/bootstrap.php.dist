@@ -101,4 +101,4 @@ require $wpPhpunit.'/includes/bootstrap.php';
 
 require_once __DIR__.'/../Support/IntegrationTestCase.php';
 
-// cspell:ignore ABSPATH autoloaded muplugins
+// cspell:ignore ABSPATH autoloaded fwrite getenv muplugins preg putenv rtrim

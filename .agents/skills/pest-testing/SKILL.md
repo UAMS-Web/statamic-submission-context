@@ -21,7 +21,7 @@ metadata:
   Edit it there, not here; the next sync overwrites this copy.
   Delivered to this repository through the profile(s): pest.
 -->
-<!-- cspell:ignore killable Livewire nikic -->
+<!-- cspell:ignore killable Livewire nikic Stache viewports -->
 
 # Pest Testing
 
@@ -253,6 +253,68 @@ Pest's `--mutate` mutates the source and requires the suite to notice. **A survi
 - **`0 Mutations for 0 Files created` is a setup failure, not a pass.** Usually a missing coverage driver or a path the finder could not resolve (see [`pcov-setup`](../pcov-setup/SKILL.md)).
 - **Pass-3 / inventory harden is single-flight.** One `--mutate` per worktree at a time. While it runs, prep the next eligible class but do not remutate it; commit the current class when it is mutation-clean (or every survivor is explained), then kick the next narrow mutate. Full rule and safe overlap list: [`pcov-setup`](../pcov-setup/SKILL.md) (three-pass walk).
 
+## JUnit checks: skipped tests and the costliest class
+
+A run that reports zero failures can still have tested less than it should (tests skipped because a fixture was missing) or have quietly become expensive (one class growing until it bounds a parallel run). Two small PHP scripts in this skill's `scripts/` folder read the JUnit report that Pest already writes and turn each case into a failing exit code. Both are PHP so a CI job that sets up PHP and nothing else can run them. Neither names an application path: every file is passed as an argument.
+
+Write the report with `--log-junit`, then run the checks:
+
+```bash
+vendor/bin/pest --log-junit=junit.xml
+php .claude/skills/pest-testing/scripts/check-skip-baseline.php --report=junit.xml --baseline=tests/skip-baseline.json
+php .claude/skills/pest-testing/scripts/check-slowest-class.php --report=junit.xml --share-ceiling=25 --ceiling=900
+```
+
+Each script exits 0 when the report is within bounds and 1 otherwise. An empty or truncated report, or one that cannot be parsed, a missing file, and a report with no usable data are also failures, never passes, because a run that produced nothing to check has not been verified.
+
+### CI step
+
+In a GitHub Actions job that already sets up PHP and installs dependencies, replace the plain test step with the three below. The checks run after the tests and only when the report was written, so a test failure is reported by the tests and a missing report is reported by the checks:
+
+```yaml
+      - name: Pest
+        run: vendor/bin/pest --log-junit=junit.xml
+      - name: Skip baseline
+        if: ${{ !cancelled() }}
+        run: php .claude/skills/pest-testing/scripts/check-skip-baseline.php --report=junit.xml --baseline=tests/skip-baseline.json
+      - name: Slowest class
+        if: ${{ !cancelled() }}
+        run: php .claude/skills/pest-testing/scripts/check-slowest-class.php --report=junit.xml --share-ceiling=25 --ceiling=900
+```
+
+### Skip baseline
+
+`check-skip-baseline.php` fails when the number of skipped tests exceeds the number recorded for the run, and prints both numbers (`skipped X, baseline Y (+Z)`) followed by the skipped tests. Fewer skips than the baseline passes, because fewer skips means more tests ran.
+
+The baseline is a JSON file the repository keeps (the example path above is a convention, not a default; `--baseline` is required):
+
+```json
+{
+    "bands": {
+        "suite": { "expected": 3, "why": "Three cases skip when the content submodule is absent." },
+        "serial": { "expected": 0, "why": "The serial tail skips nothing." }
+    }
+}
+```
+
+- A **band** is one independently run group of tests with its own report, such as a parallel run and a serial run. `--band=<name>` picks the entry and defaults to `suite`.
+- `expected` is a non-negative integer. Anything else, a missing band, or invalid JSON is a failure.
+- `why` is free text for reviewers and is not read by the script. A top-level `_comment` is ignored.
+- **Raising `expected` is a reviewable change to this file.** The pull request should say why each new skip is correct. The first assumption on a failure is a real regression (a missing submodule, a starved worker, a guard firing on input that should have resolved), not a stale number.
+
+### Costliest class
+
+`check-slowest-class.php` sums the `time` of every test case per class, then fails when the costliest class takes more than `--share-ceiling` percent of the summed class time, or more than `--ceiling` seconds. Both thresholds are checked and each failure is reported separately. Defaults are 25 percent and 900 seconds; `--band` only labels the output.
+
+- **The share is the main check.** It is a ratio, so machine load that slows every class equally cancels out of it. It is also what decides whether a class binds a parallel run: paratest distributes whole classes, so no run finishes sooner than its largest class, and a class starts costing wall-clock once its share passes 1 divided by the worker count.
+- **The seconds ceiling is the backstop.** It catches growth that hits every class at once, such as a per-test boot cost, which moves no share. Set it several times above the worst quiet reading so load alone does not reach it.
+- **The defaults are loose starting points, not measurements of any suite.** Measure the costliest class's share and time on several quiet and several busy runs, then set the share ceiling a margin above the worst share observed and below 100 divided by the workers, and pass both as flags from the CI step so the numbers sit beside the command that uses them.
+- **A serial run needs a looser share ceiling.** A load spike confined to the window where the costliest class runs is not cancelled by a ratio, and a serial run has one class per window.
+- When it fails, split the class rather than raising a ceiling.
+
+### What is not generalized
+
+The per-band measured ceilings, the backstop values and the skip counts that came with the original scripts describe one application's suite and are not shipped. Each repository records its own: the baseline file for the skip counts, and the flag values in its CI step for the cost thresholds.
 ## Common Pitfalls
 
 - Deleting tests without approval.

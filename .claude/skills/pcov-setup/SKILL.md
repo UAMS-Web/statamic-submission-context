@@ -368,7 +368,7 @@ PHP helpers ship under [`scripts/`](scripts/) with this skill and sync into ever
 | Script | What it answers |
 | --- | --- |
 | [`build-coverage-scope-csv.php`](scripts/build-coverage-scope-csv.php) | Reads `<source>` from `phpunit.xml` / `phpunit.xml.dist` and writes the three-pass tracker CSV (`file`, `pass1_touched`, `pass2_line_pct`, `pass3_mutation_clean`). That CSV is the inventory. |
-| [`publish-coverage-scope-comment.php`](scripts/publish-coverage-scope-comment.php) | Upserts a Markdown tracker comment on the repository's full-coverage issue (e.g. `uams-statamic#2834`) from the CSV. |
+| [`publish-coverage-scope-comment.php`](scripts/publish-coverage-scope-comment.php) | Upserts a Markdown tracker comment on the repository's full-coverage issue from the CSV. It requires `--pass2-min=<N>` and exits 1 without it. It posts to the `origin` repository unless `--repo=<owner>/<name>` names another, and exits 1 when neither resolves. |
 | [`check-mutation-instrument.php`](scripts/check-mutation-instrument.php) | Whether a mutant child can actually launch on this machine. Exit `0` only before trusting a mutate score; exit `1` means scores can fabricate kills (see below). |
 
 ```bash
@@ -396,10 +396,13 @@ php .claude/skills/pcov-setup/scripts/build-coverage-scope-csv.php --pass1
 php .claude/skills/pcov-setup/scripts/build-coverage-scope-csv.php --pass2 --batch=3
 
 # Publish / refresh the living Markdown table on the coverage ticket
-php .claude/skills/pcov-setup/scripts/publish-coverage-scope-comment.php --issue=2834
+# --pass2-min is this repository's own pass 3 bar (see "The pass 2 floor" below).
+php .claude/skills/pcov-setup/scripts/publish-coverage-scope-comment.php --issue=<number> --pass2-min=<N>
 
 # Pass 3: after pass 2: mutation-clean each eligible file (instrument check first)
 php .claude/skills/pcov-setup/scripts/check-mutation-instrument.php
+# --pass3 selects rows by the floor, so it requires --pass2-min=<N> and exits 1 without it.
+php .claude/skills/pcov-setup/scripts/build-coverage-scope-csv.php --pass3 --batch=1 --pass2-min=<N>
 # Snowball order (smallest estimated mutant count first): not CSV order:
 php scripts/estimate-pass3-mutants.php --print
 node scripts/pass3-next.mjs
@@ -407,7 +410,9 @@ composer mutate -- --class="App\\…\\Class" --covered-only --no-cache
 # then set pass3_mutation_clean on that row and re-publish the issue comment
 ```
 
-**Pass 3 walks the snowball queue, not CSV order.** Eligible rows (`pass1=yes`, `pass2_line_pct` meeting the ticket floor (`86.7` on `uams-statamic` #2834), empty `pass3_mutation_clean`) are ranked ascending by estimated Pest mutant count via `php scripts/estimate-pass3-mutants.php` (writes `storage/app/pass3-snowball.json`; Pest `MutationGenerator` + default mutator set: a wall-time proxy for `--covered-only`). Pick the head with `node scripts/pass3-next.mjs`. Regenerate when the eligible set changes. When `est_mutants >= 200`, launch with `run-detached-mutate.mjs --parallel=6` (mutant workers inside one job).
+**The pass 2 floor is the repository's own, and the scripts carry no default for it.** `--pass3` in the CSV builder and every run of the publisher need `--pass2-min=<N>` and exit 1 naming it when it is missing; `--pass1`, `--pass2`, `--count` and `--skeleton-only` do not read it. A repository derives its value from its own finished pass 2 column: take the 25th percentile of the non-empty `pass2_line_pct` cells once pass 2 is done, record it on the coverage ticket, and pass that number every time. `uams-statamic` recorded `86.7` this way on `UAMS-Web/uams-statamic#2834`; that is its value, not a starting point for another repository, whose bar would otherwise be selected by someone else's distribution and printed in the tracker comment as its own.
+
+**Pass 3 walks the snowball queue, not CSV order.** Eligible rows (`pass1=yes`, `pass2_line_pct` meeting the ticket floor (the `--pass2-min` value; `86.7` on `uams-statamic` #2834), empty `pass3_mutation_clean`) are ranked ascending by estimated Pest mutant count via `php scripts/estimate-pass3-mutants.php` (writes `storage/app/pass3-snowball.json`; Pest `MutationGenerator` + default mutator set: a wall-time proxy for `--covered-only`). Pick the head with `node scripts/pass3-next.mjs`. Regenerate when the eligible set changes. When `est_mutants >= 200`, launch with `run-detached-mutate.mjs --parallel=6` (mutant workers inside one job).
 
 **After the snowball pass, confirm every `n/a (0 estimated mutants)` cell.** The estimator can under-count relative to a real `--covered-only` run (and the reverse: `est > 0` with only uncovered const-array items). Revisit each such row with a narrow `vendor/bin/pest … --mutate --covered-only` (or without `--covered-only` when diagnosing) and rewrite the cell to either `narrow yes; full pending`, `n/a (0 covered mutants)`, or `n/a (0 covered; N uncovered …)` with the measured counts; do not leave estimator-only wording as the closeout record.
 

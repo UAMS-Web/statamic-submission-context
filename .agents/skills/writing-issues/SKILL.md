@@ -52,6 +52,12 @@ repository has no templates, build the body from the section inventory below.
 here.** When the house style changes, change it here first and reconcile the template, never
 the reverse, or the two silently diverge.
 
+**The skeletons ship with this skill** in [`templates/`](templates/): `1-bug.md`, `2-feature.md`,
+`3-research-spike.md` and `4-follow-up-cleanup.md`. The sync never writes `.github/`, so a
+repository copies them once to `.github/ISSUE_TEMPLATE/` and keeps them current by comparing
+against the skill's copy. Each file opens with front matter (`name`, `about`, `type`, `labels`)
+that GitHub reads for the template chooser, followed by the sections of the inventory below.
+
 ## Output format
 
 When proposing an issue, give the **title** on its own line and present the **body as a single
