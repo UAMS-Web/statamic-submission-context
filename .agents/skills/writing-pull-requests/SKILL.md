@@ -54,11 +54,14 @@ against the skill's copy:
 | `pull_request_template.md` | `.github/pull_request_template.md` | The skeleton of this skill |
 | `assign-author.yml` | `.github/workflows/assign-author.yml` | Assigns the pull request to its author |
 | `check-attribution-footer.yml` | `.github/workflows/check-attribution-footer.yml` | Fails a body carrying an attribution footer, a session link or `U+1F916` |
+| `check-closing-keyword-across-lines.yml` | `.github/workflows/check-closing-keyword-across-lines.yml` | Fails a body holding a closing keyword at the end of one line and an issue reference at the start of the next |
 
 The footer check runs [`scripts/check-attribution-footer.mjs`](scripts/check-attribution-footer.mjs),
 which the workflow calls from the skill's own directory, so a target needs the skill and the
 workflow and nothing else. It lives here rather than beside the emoji rule because a rule
 cannot own a template; the rule that bans the glyph is `no-emoji-in-durable-records`.
+
+The closing-keyword check runs [`scripts/check-closing-keyword-across-lines.mjs`](scripts/check-closing-keyword-across-lines.mjs) the same way. GitHub reads a newline as whitespace, so a status column whose last cell is `closed` above a row labelled `#N` is the directive `closed #N`, and a squash merge acts on it. The workflow reads the body through the API, and the script runs the `github-api-budget` same-line control before it reads anything. `--range` and `--commit` read commit messages instead. Reword a flagged pair: put the number first, or write the cell as something other than a bare keyword.
 
 ## Output format
 

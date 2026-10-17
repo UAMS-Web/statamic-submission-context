@@ -19,6 +19,22 @@
 // Usage, from the repository root (macOS, Linux and Windows; Node 20 or newer, no
 // dependencies):
 //     node .claude/skills/pest-testing/scripts/clear-testing-litter.mjs
+//     node .claude/skills/pest-testing/scripts/clear-testing-litter.mjs --root=<dir>
+//     node .claude/skills/pest-testing/scripts/clear-testing-litter.mjs --skip-artisan
+//     node .claude/skills/pest-testing/scripts/clear-testing-litter.mjs --force
+//
+// `--root=<dir>` acts on that application root instead of the working directory (a slot
+// reached from elsewhere). `--skip-artisan` removes the litter and restores the placeholder
+// but runs neither artisan command (no PHP on the machine, or the application cannot boot).
+// `--force` overrides the live-run guard below and nothing else.
+//
+// It also refuses, changing nothing, while a mutation run is live: clearing the directory
+// under a running `--mutate` orphans that run's throwaway Stache and content mirror. A run is
+// live when a `storage/logs/mutate-*.status` file has no `exit=` line and names a process
+// (`child=`, `runner=` or `pid=`) that is still running. A status file left by a run that was
+// killed names a process that is gone and does not block. When it blocks and the file is
+// wrong anyway (a recycled process id, for one), read it, confirm the run is not yours, and
+// pass `--force`.
 //
 // It refuses, changing nothing, when the working directory has no `artisan` file or no
 // `storage/framework/testing` directory, and when that directory, or a directory above it
@@ -26,13 +42,13 @@
 // inside it is removed as a link; its target is not touched.
 //
 // Exit 0 done, 1 a step failed (a removal, the restore or an artisan command), 2 refused
-// before anything changed.
+// before anything changed (not an application root, a symbolic link, or a live mutation run).
 //
 // Shipped by the shared sync from UAMS-Web/uams-claude-skills, with its tests beside it.
 
 import { spawnSync } from 'node:child_process'
-import { existsSync, lstatSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const TESTING_DIR = 'storage/framework/testing'
@@ -62,6 +78,48 @@ export function refusal(root) {
     return null
 }
 
+/** True when a process with this id is running (one we may not signal still counts). */
+function pidAlive(pid) {
+    if (!Number.isInteger(pid) || pid <= 0) return false
+    try {
+        process.kill(pid, 0)
+        return true
+    } catch (e) {
+        return e.code === 'EPERM'
+    }
+}
+
+/**
+ * The status file of a live mutation run, or null when none is. A file with an `exit=` line
+ * is finished; otherwise it is live when any process it names is running.
+ */
+export function liveMutateStatusPath(root) {
+    const logs = join(root, 'storage', 'logs')
+    let names
+    try {
+        names = readdirSync(logs).sort()
+    } catch {
+        return null
+    }
+    for (const name of names) {
+        if (!/^mutate-.+\.status$/u.test(name)) continue
+        const path = join(logs, name)
+        let raw
+        try {
+            raw = readFileSync(path, 'utf8')
+        } catch {
+            continue
+        }
+        if (/^exit=/mu.test(raw)) continue
+        const ids = [/\bchild=(\d+)/u, /\brunner=(\d+)/u, /\bpid=(\d+)/u].flatMap((pattern) => {
+            const match = raw.match(pattern)
+            return match ? [Number(match[1])] : []
+        })
+        if (ids.some(pidAlive)) return path
+    }
+    return null
+}
+
 /** Run one fixed command line in `root`; returns its exit status (null when it could not start). */
 function run(command, root) {
     // A fixed command string through the shell, so Windows' `.bat` shims (Herd's `php`) run;
@@ -70,11 +128,30 @@ function run(command, root) {
     return result.error ? null : result.status
 }
 
-export function main(root = process.cwd(), out = console.log, err = console.error) {
+/** Flags from the command line: `--force`, `--skip-artisan`, `--root=<dir>`. */
+export function parseArgs(argv) {
+    const options = { force: false, skipArtisan: false, root: null, unknown: [] }
+    for (const arg of argv) {
+        if (arg === '--force') options.force = true
+        else if (arg === '--skip-artisan') options.skipArtisan = true
+        else if (arg.startsWith('--root=') && arg.length > '--root='.length) options.root = arg.slice('--root='.length)
+        else options.unknown.push(arg)
+    }
+    return options
+}
+
+export function main(root = process.cwd(), out = console.log, err = console.error, { force = false, skipArtisan = false } = {}) {
     const why = refusal(root)
     if (why) {
         err(`clear-testing-litter: refused: ${why}. Nothing was changed.`)
         return 2
+    }
+    if (!force) {
+        const live = liveMutateStatusPath(root)
+        if (live) {
+            err(`clear-testing-litter: refused: ${live} has no exit= line and names a running process, so a mutation run looks live and clearing ${TESTING_DIR} would orphan it. Wait for the run to finish. If the file is stale (the run was killed and its process id has since been reused), read it, confirm the run is not yours, and pass --force. Nothing was changed.`)
+            return 2
+        }
     }
 
     const dir = join(root, ...TESTING_DIR.split('/'))
@@ -110,7 +187,7 @@ export function main(root = process.cwd(), out = console.log, err = console.erro
         out(`restored ${TESTING_DIR}/${PLACEHOLDER}`)
     }
 
-    for (const command of ARTISAN_COMMANDS) {
+    for (const command of skipArtisan ? [] : ARTISAN_COMMANDS) {
         const status = run(command, root)
         if (status !== 0) {
             err(`clear-testing-litter: \`${command}\` failed (exit ${status})`)
@@ -124,5 +201,11 @@ export function main(root = process.cwd(), out = console.log, err = console.erro
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
-    process.exitCode = main()
+    const options = parseArgs(process.argv.slice(2))
+    if (options.unknown.length) {
+        console.error(`clear-testing-litter: unknown argument ${options.unknown.join(' ')}; accepted: --root=<dir>, --skip-artisan, --force`)
+        process.exitCode = 2
+    } else {
+        process.exitCode = main(resolve(options.root ?? process.cwd()), console.log, console.error, options)
+    }
 }
