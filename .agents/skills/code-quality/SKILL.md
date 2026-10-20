@@ -36,6 +36,8 @@ The tools run on the developer's PHP, not on the version the code supports. A pl
 
 Every repository also pins line endings in `.gitattributes` with `* text=auto eol=lf`. Without that line, Windows `core.autocrlf=true` rewrites a checkout to CRLF and the damage shows up as something else: Pint `line_ending` reports, YAML or skill frontmatter that fails to parse (`---` vs `---\r`), or line-based tests matching a trailing `\r`. A committed `eol` attribute outranks `core.autocrlf`, so the working tree stays LF on every platform. `* text=auto` alone is not enough: it normalizes on commit but still checks out CRLF when autocrlf is on. Copy `templates/.gitattributes` when the file is missing, or add that one line at the top when the file already exists for `export-ignore` or other rules. Adding the attribute does not rewrite bytes already committed as CRLF; confirm with `git ls-files --eol` and renormalize only when the index half shows `i/crlf` (see the line-endings section of the [`worktrees`](../rule-worktrees/SKILL.md) rule where a repository carries it).
 
+The `.editorconfig` template pins the same style in the editor, so a save never produces a change that Pint or `eol=lf` then reverts: UTF-8, LF, four spaces for PHP and JSON, two for Markdown and YAML, a final newline and trimmed trailing whitespace, except in Markdown, where two trailing spaces are a line break. It carries no front-end rules; a repository with HTML, Vue or SCSS adds its own sections. UAMS-Web/uams-claude-skills checks that the template parses, sets `root = true`, and agrees with the `.gitattributes` and `pint.json` templates.
+
 Pint's `laravel` preset is the one style across the organization's PHP, WordPress code included. Pint has no WordPress preset (its presets are `laravel`, `per`, `psr12`, `symfony` and `empty`), and a second style in WordPress code was rejected: `uamswp-migration-api` already formats WordPress code with the `laravel` preset (its `docs/DECISIONS.md` D-014), and the alternatives, a custom WordPress-style configuration on the `empty` preset or Pint outside WordPress only, mean custom rules to maintain or two styles.
 
 The templates beside this skill are the shared starting configurations. Each repository keeps its own copy with its own paths, PHP version and current static-analysis level.
@@ -43,13 +45,14 @@ The templates beside this skill are the shared starting configurations. Each rep
 | Template | Copy to | For |
 |---|---|---|
 | `templates/.gitattributes` | repository root (or merge its `* text=auto eol=lf` line into an existing file) | every repository |
+| `templates/.editorconfig` | repository root (or merge its `[*]`, `[*.md]` and `[*.{yml,yaml}]` sections into an existing file, keeping its front-end sections) | every repository |
 | `templates/rector.php.dist` and `templates/rector-sweep.php.dist` | repository root as `rector.php` / `rector-sweep.php` (drop `.dist`) | every repository |
 | `templates/phpstan.neon.dist` | `phpstan.neon.dist` | PHP that is neither Laravel nor WordPress |
 | `templates/phpstan-wordpress.neon.dist` | `phpstan.neon.dist` | WordPress plugins, must-use plugins and themes |
 | `templates/phpstan-larastan.neon.dist` | `phpstan.neon.dist` | Laravel and Statamic applications |
 | `templates/pint.json` | repository root | every repository |
 | `templates/phpcs.xml.dist` | repository root | only a repository that keeps WordPressCS |
-| `templates/.git-blame-ignore-revs` | repository root | every repository, at the reformat commit |
+| `templates/.git-blame-ignore-revs` | repository root | a repository at its first reformat commit; omitted until one exists (see [The reformat commit](#the-reformat-commit)). Under a squash merge, the hash recorded is the squash commit's on the default branch, not the branch commit's |
 | `templates/setup-git-hooks.php` | `scripts/setup-git-hooks.php` | a Composer repository that commits a `.githooks/pre-commit` |
 | `templates/pre-commit` | `.githooks/pre-commit`, executable | a Composer repository that commits a pre-commit hook |
 
@@ -193,7 +196,21 @@ What the template sets, and what to keep when adapting it:
 - `concurrency` keyed on the workflow and ref, cancelling in-progress runs for pull requests only, so a push replaces a stale run and `main` runs are never cancelled.
 - PHP, the Composer cache and the locked install live in the composite action, which `dependabot.yml` also covers (see the `update-dependencies-ticket` skill's `templates/dependabot.yml`).
 
-A mutation job and a spell-check job are not in the template: both stay with the repository that wants them.
+- The `mutate` job runs the mutation score for a repository that meets the Full coverage bar. It is the one job that installs a coverage driver: it passes `coverage: pcov` to the composite action, whose `coverage` input defaults to `none` so every other job keeps the faster, driver-free PHP. See *Adopting the `mutate` job* below.
+
+A spell-check job is not in the template. The `spell-check` skill (profile `spell`) ships the `cspell.json` and `project-words.txt` seeds, the `spell` script and a `spell` job snippet for a repository that wants one.
+
+#### Adopting the `mutate` job
+
+The job is for a repository that has Pest, the patched `pest-plugin-mutate` and a `mutate` Composer script (a Statamic add-on's is `pest --mutate --path=src`). A repository without them drops the job from the copy of `ci.yml`.
+
+1. Copy the `mutate` job and the composite action's `coverage` input. An existing `.github/actions/setup/action.yml` gains the input by editing it; the default stays `none`, so the other jobs are unchanged.
+2. Keep `coverage: pcov` on the job's setup step. `--mutate` needs a coverage driver, and without one a run either stops with `Mutation testing requires code coverage to be enabled` or reports `0 Mutations for 0 Files created`; the [`pcov-setup`](../pcov-setup/SKILL.md) skill covers both and the per-machine install for a local run. PCOV is the driver here because it is purpose-built for coverage and much faster than Xdebug.
+3. Keep both steps. The first runs `composer mutate -- --min=100` and keeps the output in `mutate.log`; Pest fails the step on any survivor. The second runs the `pest-testing` skill's `check-mutation-run.php` against that log, and it fails a run that created no mutants, or that left any mutant untested, uncovered, pending or timed out, even when the first step passed. It runs with `if: always()`, so a failed first step still prints the log's own account.
+4. Fix a failure the way the `pest-testing` skill's mutation section describes: a survivor is killed with a test, deleted as dead code, or annotated with `@pest-mutate-ignore:<Mutator>` and a reason on the line above. An annotation that suppresses nothing, or everything, is the `mutate-ignore` job's business.
+5. A repository that gates its Actions jobs on `RUN_REMOTE_CI` adds the same `if:` to this job. It is the slowest job in the chain, hence its 45-minute timeout; raise it when a suite needs longer, and do not remove it.
+
+A required status check lists the job by its `name:`, `Mutation score (full, with PCOV)`.
 
 ## Finding the starting static-analysis level
 
@@ -213,6 +230,8 @@ A baseline file, which PHPStan offers as the other way to adopt a high level by 
 ## The reformat commit
 
 The first Pint run over a repository touches most files. Land it as one commit holding only Pint's changes, so `git blame` can skip it:
+
+**A repository that adopts Pint at creation has no reformat commit, and omits `.git-blame-ignore-revs` until it has one.** Its code is formatted on the way in, so step 4 below has no hash to record, and the template's `PLACEHOLDER` line cannot be filled honestly. The file is created at the first real bulk reformat: a later Pint upgrade or rule change that rewrites existing code. Measured in `UAMS-Web/statamic-multisite-forms` on 2026-10-12: one commit created every PHP file with the tooling in place, and no reformat-only commit exists. The template as shipped is comment lines only, which `git blame` accepts (a comment-only `blame.ignoreRevsFile` exits 0 on git 2.32, Windows), but a non-comment placeholder line fails with `fatal: invalid object name`, so do not commit the file with a placeholder entry.
 
 1. Commit the tooling configuration first (`pint.json`, `rector.php`, `phpstan.neon.dist`, Composer changes, and the rest of the adoption configs). Then open a branch whose only remaining work is the reformat (or run the reformat on a branch that already has those configs on `main`). Do not mix config adoption and the mass reformat in one commit.
 2. On that reformat-only branch, run `vendor/bin/pint` (no `--dirty`, the whole repository) and read the diff.

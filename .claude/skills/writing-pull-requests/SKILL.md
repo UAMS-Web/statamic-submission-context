@@ -46,12 +46,16 @@ it via `--body-file`; if a template is added later, reconcile it against this sk
 the reverse.
 
 **The template and two workflows ship with this skill** in [`templates/`](templates/). The sync
-never writes `.github/`, so a repository copies each file once and keeps it current by comparing
-against the skill's copy:
+writes the template itself: it renders `.github/pull_request_template.md` from the skill's copy on
+every sync, naming the target's branches and the environment each test plan covers, and keeps the
+block between its `uams-claude-skills:repository-begin` and `uams-claude-skills:repository-end` lines
+(the repository's own commands, companion notes and default test-plan items) as the repository left
+it. A template that has no such block is the repository's own text and is left alone until its lines
+move into one. The sync writes nothing else under `.github/`, so a repository copies each workflow
+once and keeps it current by comparing against the skill's copy:
 
 | File | Copy to | Job |
 | --- | --- | --- |
-| `pull_request_template.md` | `.github/pull_request_template.md` | The skeleton of this skill |
 | `assign-author.yml` | `.github/workflows/assign-author.yml` | Assigns the pull request to its author |
 | `check-attribution-footer.yml` | `.github/workflows/check-attribution-footer.yml` | Fails a body carrying an attribution footer, a session link or `U+1F916` |
 | `check-closing-keyword-across-lines.yml` | `.github/workflows/check-closing-keyword-across-lines.yml` | Fails a body holding a closing keyword at the end of one line and an issue reference at the start of the next |

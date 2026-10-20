@@ -52,7 +52,7 @@ After the full packet is on screen, present the interactive decision prompt (the
 
 ## Where the decision lands once made
 
-The canonical cross-ticket decision log is `docs/DECISIONS.md`; the **GitHub tracker remains the system of record for a single ticket's status**. A decision lands in three places:
+The canonical cross-ticket decision log is `docs/DECISIONS.md`; the **GitHub tracker remains the system of record for a single ticket's status**. A repository with no log starts from the skeleton in the [`decision-log`](../../.claude/skills/decision-log/SKILL.md) skill, which also ships the order check and the `.gitattributes` line the log needs. A decision lands in three places:
 
 - **What + why + rejected alternatives** → an entry in `docs/DECISIONS.md` (the terse, durable cross-ticket index) **and** a `## Decision` (or `## Chosen approach`) section of the GitHub issue body (the per-ticket detail). Keep the two consistent: the index says what was decided, the issue says how the argument ran.
 - **The full reasoning** → the relevant `docs/` companion when the decision touches a documented design area; otherwise the issue's `## Approach` section carries it. **The standing consequence** → `AGENTS.md` when the decision changes how the whole repo is built: a design rule, a hook ordering, a toolchain floor. Keep that line short; `docs/DECISIONS.md` carries the rejected alternatives and the issue carries the reasoning.

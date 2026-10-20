@@ -229,6 +229,31 @@ Where `phpstan.neon.dist` lists `tests` among its paths, a broken mock, a wrong-
 
 Run the suite on the PHP version production runs. That is not a substitute for `phpVersion` in `phpstan.neon.dist`, which remains the only thing that reports a construct the older PHP cannot *parse*: PHPStan parses with `nikic/php-parser` regardless of the interpreter, and a parse error never reaches the test runner. Keep both.
 
+## Parallel runs: what a test may share
+
+`pest --parallel` runs several worker processes against one filesystem. A test that passes alone can fail there in two ways, and the isolation convention is the answer to each:
+
+- **Shared mutable state.** A test that writes a fixed path, faked disk or shared cache entry races with the same test in another worker, or in a second run on the same machine. Make the path unique per process (the worker token from `TEST_TOKEN` plus the process id, so two concurrent runs cannot share a worker index), or quarantine the file into a `serial` group that runs in one process after the parallel band. Prefer the unique path where the cause is known, and keep the `serial` group small and named.
+- **Global symbols in namespace-less files.** Pest files carry no namespace, so a top-level `const` or `function` is global, and a bare `use X;` names a class that is already global. A name declared in two files fatals the moment both load into one worker, and the no-op import is a compile-time warning that a framework error handler may promote to an exception before the first test runs. Both pass when the file runs alone.
+
+[`scripts/check-global-test-symbols.php`](scripts/check-global-test-symbols.php) enforces the second. `php .claude/skills/pest-testing/scripts/check-global-test-symbols.php tests` reads every PHP file under the given paths as tokens (so a match in a comment or string is ignored), prints how many files it read before any finding, and exits 0 clean, 1 on a finding, 2 when it could not see (a missing path, or no PHP file). Pass the whole suite in one run, because the redeclaration rule compares across files. Function names are compared case-insensitively, as PHP does (`helper()` in one file and `Helper()` in another collide, and the message names both spellings), while constant names stay case-sensitive. The contents of an unnamed `namespace { }` block count as global, so a function, constant or import declared there is read like one in a file with no namespace. The `code-quality` CI template's `pest` job runs it, and marks the step optional: a repository that never runs `--parallel` deletes it, since both defects show on the first serial run.
+
+### Which rules are shared, and which stay with the application
+
+`uams-statamic` keeps a larger guard, `scripts/check-parallel-safe-tests.php`, with five rules. Each was classified for whether it holds outside that application. Read at `UAMS-Web/uams-statamic` `main`, commit `e823826b8a78e002d896589c8e2c315d659f4153`, file SHA-256 `0bec900bab07c637c05a83018842049ccc578ff950d74d755fe02df03597236f` (35,744 bytes), 2026-10-15.
+
+| Rule | What it flags | Verdict | Reason |
+| --- | --- | --- | --- |
+| A | `Storage::fake(` outside a `serial` file | application-specific | Laravel only, and its premise does not hold on the installed version: `laravel/framework` v13.35.0 (the version `uams-statamic`'s lock pins) appends `_test_{token}` to a faked disk root when `TEST_TOKEN` is set, so workers do not share the root. What remains is two concurrent runs sharing a worker index, which is that application's `ThrowawayRoot` concern. |
+| B | `storage_path('...framework/testing...')` with no uniqueness token | application-specific | Hardcodes Laravel's `framework/testing` layout and recognizes that application's `ThrowawayRoot` helper by class name. |
+| C | A global `const` or `function` declared in more than one file | shared | Pure PHP token analysis, no framework or layout assumption. Shipped. |
+| D | A single-segment `use X;` in a file with no named namespace | shared | Pure PHP token analysis. The warning is PHP's; whether it becomes fatal depends on the error handler, which is why it is a parallel-run defect in Laravel. Shipped. |
+| E | `assert()` or `\assert()` anywhere under `tests/` | application-specific | A typing policy rather than parallel safety, and its remedy names that application's `TypeNarrowing` helpers. A repository that wants the policy writes its own rule. |
+
+**Decision: ship C and D, keep A, B and E with the application.** The shipped script carries a test per rule, a negative case for each neighboring shape it must leave alone, and a clean control. Each rule was also exercised against a real tree: the script read all 1,137 files of the `uams-statamic` suite at the commit above with no finding, then reported both rules on a copy with one duplicate function and one no-op import planted.
+
+Of the three consumers, only `uams-statamic` runs `--parallel` (`wordpress-importer` and `uamswp-migration-api` run their suites serially), so the shared script has one parallel consumer today. Adopting it there means replacing rules C and D in its private guard, which is that repository's change. Revisit the split when a second repository adopts `--parallel` and meets a shared-state defect that Rule A or B would have caught outside Laravel.
+
 ## Mutation testing
 
 Pest's `--mutate` mutates the source and requires the suite to notice. **A surviving mutant is a false-green test**: the code changed and nothing failed. The coverage driver it needs, the invocation forms that silently do nothing, and the checks that show a run executed at all are in [`pcov-setup`](../pcov-setup/SKILL.md); read that before trusting any score, including a perfect one. This section is how to read a run that did execute, and how to record what you decide about each survivor.
@@ -252,6 +277,7 @@ Pest's `--mutate` mutates the source and requires the suite to notice. **A survi
 - **Name the platform the score was taken on, in the same line as the score.** A mutation score is the claim where omitting the machine costs the most: `100%` is simultaneously the house standard and the precise signature of a run that executed nothing, so a corpus of unattributed scores cannot audit itself in either direction.
 - **Never pass `--filter` to a `--mutate` run; scope it with `--path`**, and read a reported timeout as unverified, never as a kill. Why is in [`pcov-setup`](../pcov-setup/SKILL.md).
 - **`0 Mutations for 0 Files created` is a setup failure, not a pass.** Usually a missing coverage driver or a path the finder could not resolve (see [`pcov-setup`](../pcov-setup/SKILL.md)).
+- **Run [`scripts/check-mutation-run.php`](scripts/check-mutation-run.php) on the output rather than reading a score off it.** `php .claude/skills/pest-testing/scripts/check-mutation-run.php mutate.log [--min=<score>]` fails (exit 1) on a run that created no mutants, on any untested, uncovered, pending or timed-out mutant, and on a score under the minimum (default 100). It prints the counts it read before any finding, and exits 2 when the log cannot be read. The `code-quality` CI template's `mutate` job runs it after `composer mutate -- --min=100`.
 - **Pass-3 / inventory harden is single-flight.** One `--mutate` per worktree at a time. While it runs, prep the next eligible class but do not remutate it; commit the current class when it is mutation-clean (or every survivor is explained), then kick the next narrow mutate. Full rule and safe overlap list: [`pcov-setup`](../pcov-setup/SKILL.md) (three-pass walk).
 - **Clearing `storage/framework/testing/` while a `--mutate` run is live orphans that run.** [`scripts/clear-testing-litter.mjs`](scripts/clear-testing-litter.mjs) refuses, exiting 2 and changing nothing, when a `storage/logs/mutate-*.status` file has no `exit=` line and names a running process (`child=`, `runner=` or `pid=`). A status file left by a killed run names a process that is gone and does not block. When it blocks wrongly (a recycled process id), read the file, confirm the run is not yours, and pass `--force`, which overrides this guard and nothing else (a root that is not an application, and a symbolic link on the path, are still refused). `--skip-artisan` removes the litter and restores the placeholder without running `cache:clear` or `statamic:stache:clear`, for a machine without PHP or an application that cannot boot. `--root=<dir>` acts on that application root instead of the working directory.
 
@@ -271,11 +297,11 @@ Each script exits 0 when the report is within bounds and 1 otherwise. An empty o
 
 ### CI step
 
-In a GitHub Actions job that already sets up PHP and installs dependencies, replace the plain test step with the three below. The checks run after the tests and only when the report was written, so a test failure is reported by the tests and a missing report is reported by the checks:
+In a GitHub Actions job that already sets up PHP and installs dependencies, replace the plain test step with the three below; the `pest` job in the `code-quality` skill's `ci.yml` template carries exactly these. `composer test` forwards the extra argument to Pest, so a repository whose test script is something else changes only the first command. The checks run after the tests and not on a cancelled run, so a test failure is reported by the tests and a missing report is reported by the checks:
 
 ```yaml
       - name: Pest
-        run: vendor/bin/pest --log-junit=junit.xml
+        run: composer test -- --log-junit=junit.xml
       - name: Skip baseline
         if: ${{ !cancelled() }}
         run: php .claude/skills/pest-testing/scripts/check-skip-baseline.php --report=junit.xml --baseline=tests/skip-baseline.json

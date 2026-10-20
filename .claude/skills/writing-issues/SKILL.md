@@ -53,7 +53,7 @@ here.** When the house style changes, change it here first and reconcile the tem
 the reverse, or the two silently diverge.
 
 **The skeletons ship with this skill** in [`templates/`](templates/): `1-bug.md`, `2-feature.md`,
-`3-research-spike.md` and `4-follow-up-cleanup.md`. The sync never writes `.github/`, so a
+`3-research-spike.md` and `4-follow-up-cleanup.md`. The sync writes no issue template under `.github/`, so a
 repository copies them once to `.github/ISSUE_TEMPLATE/` and keeps them current by comparing
 against the skill's copy. Each file opens with front matter (`name`, `about`, `type`, `labels`)
 that GitHub reads for the template chooser, followed by the sections of the inventory below.
