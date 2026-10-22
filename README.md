@@ -72,7 +72,7 @@ Add each restored job's name to the ruleset in the same change, in the order `ci
 ### 4. Settings that live outside the repository
 
 - **Create the wiki's first page, before the add-on's first release.** In the new repository, open the Wiki tab, choose *Create the first page* and save it. A repository generated from the template does not get a wiki, and the wiki's git repository does not exist until a first page does, so `publish-wiki.yml` fails on its push without it. The first publish replaces that page with `docs/wiki/`. Also restrict wiki editing to collaborators (*Settings*, *Features*), since a publish overwrites browser edits. The `github-wiki` skill has the detail. Delete `publish-wiki.yml` and `docs/wiki/` if the add-on will have no wiki.
-- The organization ruleset "main: required checks" must list every job `name:` in `ci.yml` and the two pull-request-body workflows. `check-required-checks.yml` reports drift.
+- The organization ruleset requires three checks on `main`: `CI`, `Attribution footer` and `Closing keywords`. `CI` is the last job in `ci.yml` and `needs:` every other job, so a new job is added to that list rather than to the ruleset.
 - A `LICENSE` and `composer.json`'s `license` field, once `UAMS-Web/uams-statamic#3039` is decided.
 
 ## Keeping the tooling separable

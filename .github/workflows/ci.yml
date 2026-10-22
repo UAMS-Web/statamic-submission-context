@@ -7,14 +7,13 @@ name: CI
 # script (and the other way round). The shared setup lives in
 # `.github/actions/setup/action.yml`.
 #
-# REQUIRED CHECKS. The organization ruleset "main: required checks
-# (<this repository>)" requires every job's `name:` below, plus the `name:` of the two
-# pull-request-body workflows, by that exact string. Renaming or adding a job here means
-# updating that ruleset's list in the same change: a renamed job leaves the old name pending
-# forever and blocks every pull request, and a new job is not required until it is listed.
+# REQUIRED CHECKS. The organization ruleset for this repository requires three contexts: `CI`,
+# `Attribution footer` and `Closing keywords`. `CI` is the last job in this file; it `needs:`
+# every other job, runs `if: always()`, and fails unless every needed job reports `success`
+# (a `skipped` or `cancelled` job fails it). The ruleset therefore never lists a job by name:
+# renaming a job changes nothing it requires, and a new job is required once it is added to
+# the `needs:` list of `CI`. Add it there in the same change. Do not rename `CI`.
 # Job names must stay unique across all workflows in this repository.
-# `check-required-checks.yml` compares the two lists and reports drift; see its header for the
-# order in which a job and its ruleset entry change.
 
 on:
   pull_request:
@@ -247,3 +246,38 @@ jobs:
 
       - run: composer stan
       - run: composer test
+
+  # The one check a ruleset requires from this workflow. Keep `needs:` listing every other job
+  # in the file.
+  ci:
+    name: CI
+    needs:
+      - composer-validate
+      - synced-files
+      - no-emoji
+      - scripts
+      - built-assets
+      - mutate-ignore
+      - mutation-instrument
+      - parallel-safe
+      - pint
+      - rector
+      - phpstan
+      - pest
+      - compatibility
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # `skipped` and `cancelled` fail as well as `failure`: a job that did not run proved nothing.
+      - name: Every needed job succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Needed job results: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != "success" ]; then
+              echo "::error::A needed job reported $result"
+              exit 1
+            fi
+          done
