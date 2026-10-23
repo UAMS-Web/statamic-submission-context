@@ -20,7 +20,7 @@ The shared sync from UAMS-Web/uams-claude-skills writes the same rules and skill
 
 ## Which files are managed
 
-Every path listed under `files` in `.claude/sync-manifest.jsonc`. The sync records a sha256 for each one under `hashes`. A file the manifest does not list belongs to this repository, even inside `.claude/`, and the sync leaves it alone. So does `AGENTS.md` outside its generated section.
+Every path listed under `files` in `.claude/sync-manifest.jsonc`. The sync records a sha256 for each one under `hashes`. A file the manifest does not list belongs to this repository, even inside `.claude/`, and the sync leaves it alone. The one exception to "the sync never writes a file it does not list" is a key, not a file: the sync merges the shared `attribution` key into `.claude/settings.json` and records a hash of that key under `settings`. The check compares that key only, so every other setting in the file is free to change; a changed or removed `attribution` is reported, and the next sync leaves a changed value alone and puts a removed key back. So does `AGENTS.md` outside its generated section.
 
 ## Where a change belongs
 
@@ -42,7 +42,7 @@ A repository that runs GitHub Actions carries the same check as a `synced-files`
 
 | Exit | Meaning |
 |------|---------|
-| 0 | Every managed file matches its hash. The output says how many were checked. |
+| 0 | Every managed file matches its hash, and the shared settings key(s) match theirs. The output says how many were checked. |
 | 1 | At least one managed file was changed, is missing, or is not a regular file. Each is named. |
 | 2 | The check did not run: no manifest, a manifest that is not JSON, or one with no hashes. |
 
@@ -56,7 +56,7 @@ Do not fix it by regenerating anything here. Restore the named file from git to 
 
 ## Workflow copies
 
-The sync never writes `.github/`, so the workflows the shared skills ship as templates (`assign-author.yml`, `check-attribution-footer.yml` and `check-closing-keyword-across-lines.yml` from `writing-pull-requests`, `clear-handed-back.yml` from `handed-back-label`) are copied once and then drift unseen. This skill's second script compares each copy with its template:
+The sync writes no workflow under `.github/` (its one file there is the pull request template), so the workflows the shared skills ship as templates (`assign-author.yml`, `check-attribution-footer.yml` and `check-closing-keyword-across-lines.yml` from `writing-pull-requests`, `clear-handed-back.yml` from `handed-back-label`) are copied once and then drift unseen. This skill's second script compares each copy with its template:
 
 ```sh
 node .claude/skills/synced-files/scripts/check-workflow-copies.mjs

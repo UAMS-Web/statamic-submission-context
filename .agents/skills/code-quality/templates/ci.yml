@@ -28,6 +28,28 @@ name: CI
 # runs Pest's `--mutate`; a repository without it drops the job. Do not add a second copy
 # of the check as a Composer script and a job.
 #
+# The mutate job runs the mutation score for a repository whose Pest suite meets the Full
+# coverage bar (a Statamic add-on's `composer mutate` script is `pest --mutate --path=src`).
+# It installs PCOV through the setup action's `coverage` input, because `--mutate` without a
+# coverage driver either errors or reports `0 Mutations for 0 Files created`, and it fails on
+# a run that created no mutants as well as on any untested, uncovered or timed-out mutant.
+# A repository without a `mutate` Composer script, or without the patched pest-plugin-mutate,
+# drops the job. The code-quality skill says how to adopt it.
+#
+# The pest job writes a JUnit report and runs the pest-testing skill's two checks on it: the
+# skipped-test count against `tests/skip-baseline.json` (a file the repository keeps; the skill
+# describes its shape) and the costliest class. A repository without a skip baseline yet, or
+# whose Pest suite is not in this job, drops the two check steps and keeps the plain step.
+#
+# The pest job's "Global test symbols" step runs the pest-testing skill's check for a global
+# `const` or `function` declared in more than one Pest file, and for a no-op `use X;` import in a
+# file with no namespace. It is optional for a repository that does not run `pest --parallel`:
+# both defects fail a serial run on its first execution, where the author sees them, and only a
+# parallel run turns them into a failure that depends on how files land on workers. Such a
+# repository deletes the step. The guard's other parallel-safety rules (a faked storage disk, a
+# hardcoded `framework/testing` path) stay with the application that owns them; the pest-testing
+# skill says why.
+#
 # Jobs are chained with `needs:`, cheapest first, so a pull request that fails a cheap check
 # does not spend minutes on the dear ones. A skipped job is not a passing job: where a
 # ruleset requires these checks by name, a chain that stops early leaves the later ones
@@ -146,6 +168,31 @@ jobs:
       # plugin revision its parsing model was measured against.
       - run: php .claude/skills/pest-testing/scripts/check-mutate-ignore.php
 
+  mutate:
+    name: Mutation score (full, with PCOV)
+    needs: [rector, phpstan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+        with:
+          coverage: pcov
+
+      # `--min=100` makes Pest fail the step on any survivor. The run is kept in a log
+      # because a run that mutated nothing is a setup failure that Pest's exit status
+      # reports or not depending on its version and `ignore_min_score_on_zero_mutations`.
+      # Bash runs this step with pipefail, so `tee` does not hide Pest's status.
+      - name: Run mutation testing
+        run: composer mutate -- --min=100 2>&1 | tee mutate.log
+
+      # Reads the log, not the exit status: fails on zero mutants, and on any untested,
+      # uncovered, pending or timed-out mutant. Runs even when the step above failed, so the
+      # log's own account of the failure is printed.
+      - name: Check the mutation run
+        if: always()
+        run: php .claude/skills/pest-testing/scripts/check-mutation-run.php mutate.log
+
   pest:
     name: Pest
     needs: [rector, phpstan]
@@ -154,4 +201,24 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - run: composer test
+
+      # Optional: delete this step in a repository that does not run `pest --parallel`.
+      - name: Global test symbols
+        run: php .claude/skills/pest-testing/scripts/check-global-test-symbols.php tests
+
+      # `composer test` passes the extra argument to Pest, which writes the JUnit report the two
+      # checks below read. The checks run after the tests whether or not they passed, but not on
+      # a cancelled run, so a test failure is reported by the tests and a missing or empty
+      # report is reported by the checks.
+      - name: Pest
+        run: composer test -- --log-junit=junit.xml
+
+      # Fails when more tests were skipped than tests/skip-baseline.json records.
+      - name: Skip baseline
+        if: ${{ !cancelled() }}
+        run: php .claude/skills/pest-testing/scripts/check-skip-baseline.php --report=junit.xml --baseline=tests/skip-baseline.json
+
+      # Fails when one class takes over 25 percent of the summed class time, or over 900 seconds.
+      - name: Slowest class
+        if: ${{ !cancelled() }}
+        run: php .claude/skills/pest-testing/scripts/check-slowest-class.php --report=junit.xml --share-ceiling=25 --ceiling=900
