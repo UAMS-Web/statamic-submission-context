@@ -65,5 +65,4 @@ A Statamic add-on (`uams-web/statamic-addon-template`, namespace `UAMSWeb\AddonT
 
 ### Repository skills
 
-- [`github-wiki`](.claude/skills/github-wiki/SKILL.md): planning, writing and publishing the GitHub wiki. It belongs to this repository; the sync leaves it alone.
 - [`marketplace-review`](.claude/skills/marketplace-review/SKILL.md): Statamic's own review of an add-on against its [marketplace submission guidelines](https://statamic.com/marketplace/submission-guidelines). It is Statamic's file, kept byte-identical to [the download](https://statamic.com/downloads/marketplace-review/SKILL.md) (policy revision 2026-09-14, SHA-256 `30289fc818f0cdea540c6f054a0024ed9b60c1e6aa4a51cf345909d39461b8c6`), in `.claude/skills/` and in `.agents/skills/`, where the guidelines say to save it. Replace both copies with a fresh download rather than editing either.
