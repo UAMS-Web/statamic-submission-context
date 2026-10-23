@@ -35,3 +35,13 @@ Oldest first, one entry per closed decision, so **a new entry is appended to the
 **Rejected.** Snapshotting the synced files into the template: every new add-on would begin with a stale copy that conflicts with its first sync pull request. Copying a license from an existing add-on: legal has not decided which license applies.
 
 **Companion.** `UAMS-Web/uams-statamic#3039`.
+
+## 2026-10-22: The ruleset requires one aggregate check, and the drift check is removed (UAMS-Web/uams-claude-skills#300)
+
+**Decision.** `ci.yml` ends in a `CI` job that `needs:` every other job and fails unless each reports `success`. The organization ruleset for this repository requires `CI`, `Attribution footer` and `Closing keywords` and no per-job name. `check-required-checks.yml`, `scripts/check-required-checks.mjs` and its test are removed.
+
+**Why.** The ruleset listed one name per job, so every rename or added job meant editing the ruleset, and the drift check existed only to report when the two lists disagreed. With one aggregate name the lists cannot disagree: a job missing from the `needs:` of `CI` is the only drift left, and the template's own check in `UAMS-Web/uams-claude-skills` covers it.
+
+**Rejected.** Keeping the drift check beside the aggregate: it would compare a list of three names with job names it no longer has to match. Gating `CI` on a remote-CI variable: this repository is public and runs every job on every pull request.
+
+**Companion.** `UAMS-Web/uams-claude-skills#300`, `#292`, `#169`; `UAMS-Web/statamic-multisite-forms#198`.
